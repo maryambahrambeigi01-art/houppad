@@ -138,6 +138,8 @@ function makeFigure(pname, lines, place, opts = {}) {
   el._layout = L; el._txt = txt; el._seed = opts.seed || (Math.random() * 1e6 | 0);
   return el;
 }
+let figGen = 0;
+function clearFigures() { figGen++; document.querySelector('#figs').innerHTML = ''; }
 function mountFigure(el, anim, dir = 1) {
   $('#figs').appendChild(el);
   jitter(el._txt, el._seed);
@@ -330,7 +332,7 @@ let state = { screen: 'loading' };
 function go(s, replace) { state = s; try { history[replace ? 'replaceState' : 'pushState'](s, ''); } catch (e) {} render(); }
 addEventListener('popstate', e => { const s = e.state; if (s && s.screen && s.screen !== 'loading') { state = s; render(); } });
 const ui = () => $('#ui');
-function render() { document.body.dataset.screen = state.screen; closeZoom(); closeHist(); closeResetConfirm(); ({ home, perm, play: playScreen, favs: favScreen })[state.screen](); }
+function render() { document.body.dataset.screen = state.screen; closeZoom(); closeHist(); closeResetConfirm(); ({ home, perm, age: ageScreen, play: playScreen, favs: favScreen })[state.screen](); }
 function layoutBox() {
   const cs = getComputedStyle(document.documentElement);
   const sat = parseFloat(cs.getPropertyValue('--sat-px')) || 0;
@@ -357,7 +359,7 @@ function home() {
   bindModeButtons();
   $('#resetGeneral').onclick = ev => { ev.stopPropagation(); askReset('General'); };
   $('#resetRelation').onclick = ev => { ev.stopPropagation(); askReset('Relation'); };
-  $('#figs').innerHTML = '';
+  clearFigures();
   const { W, H } = { W: innerWidth, H: innerHeight }, sf = safe();
   const titleBottom = ui().querySelector('.titlebox').getBoundingClientRect().bottom + 14;
   const footTop = ui().querySelector('.foot').getBoundingClientRect().top;
@@ -371,19 +373,44 @@ function home() {
     return el;
   };
   mountFigure(mk('morrow-proud-but-hiding-it', 'General', W * .27, 1, 11), 'pop');
-  const right = mk('vesper-plotting', 'Relation', W * .73, 2, 23); setTimeout(() => mountFigure(right, 'pop'), RM.matches ? 0 : 140);
+  const right = mk('vesper-plotting', 'Relation', W * .73, 2, 23); const gen = figGen; setTimeout(() => { if (gen === figGen) mountFigure(right, 'pop'); }, RM.matches ? 0 : 140);
 }
-function chooseDeck(deck) {
+function needsAgeGate(deck) { return deck === 'Relation' && !store.get('rel18', false); }
+function enterDeck(deck, replace) {
+  if (needsAgeGate(deck)) return go({ screen: 'age', deck }, replace);
   const seen = store.get('permSeen', false);
-  if (!seen && shake.status !== 'unsupported') return go({ screen: 'perm', deck });
+  if (!seen && shake.status !== 'unsupported') return go({ screen: 'perm', deck }, replace);
   maybeReask(); // this tap is a user gesture: re-ask iOS motion permission when needed
-  go({ screen: 'play', deck });
+  go({ screen: 'play', deck }, replace);
+}
+function chooseDeck(deck) { enterDeck(deck); }
+
+/* ---------------- 18+ gate (Relation) ---------------- */
+function ageScreen() {
+  if (!needsAgeGate(state.deck || 'Relation')) return enterDeck(state.deck || 'Relation', true);
+  setScene('new-cafe');
+  clearFigures();
+  const W = innerWidth, H = innerHeight, sf = safe();
+  ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="بازگشت">${ICON.back}</button><span></span></div>
+    <div class="panel">
+      <button type="button" class="btn" id="ageYes">آره، بزرگ شدم</button>
+      <button type="button" class="btn ghost" id="ageNo">نه، برمی‌گردم سراغ کلی</button>
+    </div>`;
+  const panelTop = ui().querySelector('.panel').getBoundingClientRect().top - 10;
+  const ageText = (J && J.age_gate) || '';
+  const lines = String(ageText).split('\n').map(t => t.trim()).filter(Boolean).map(t => ({ t }));
+  const el = makeFigure('vesper-intrigued', lines, { cx: W / 2, feet: panelTop, cw: Math.min(W * .62, 250), top: sf.t + 64, maxW: W - 24, prefW: W * .88, minFs: 20, maxFs: 26 }, { seed: 18 });
+  mountFigure(el, 'enter');
+  $('#back').onclick = () => go({ screen: 'home' });
+  $('#ageYes').onclick = () => { store.set('rel18', true); enterDeck('Relation', true); };
+  $('#ageNo').onclick = () => enterDeck('General', true);
 }
 
 /* ---------------- shake permission ---------------- */
 function perm() {
+  if (needsAgeGate(state.deck)) return enterDeck(state.deck, true);
   setScene('her-clockroom');
-  $('#figs').innerHTML = '';
+  clearFigures();
   const W = innerWidth, H = innerHeight, sf = safe();
   ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="بازگشت">${ICON.back}</button><span></span></div>
     <div class="panel"><p>${esc(J.shake_permission[1])}</p>
@@ -413,6 +440,7 @@ function loadP(deck, fresh) {
 }
 const qById = (deck, id) => D.decks[deck].find(c => c[0] === id);
 function playScreen() {
+  if (needsAgeGate(state.deck)) return enterDeck(state.deck, true);
   if (!play || play.deck !== state.deck) play = loadP(state.deck);
   if (play.maxPos == null) play.maxPos = play.pos;
   if (!play.views) play.views = {};
@@ -432,7 +460,7 @@ function playScreen() {
   $('#pill').onclick = openHist;
   bindModeButtons();
   updateHint();
-  $('#figs').innerHTML = '';
+  clearFigures();
   if (play.pos < 0) draw('first');
   else if (play.pos >= play.order.length) showEnd(false);
   else showCard('pop');
@@ -623,7 +651,7 @@ function closeZoom() { const z = $('#zoom'); if (z) z.remove(); }
 
 /* ---------------- favourites ---------------- */
 function favScreen() {
-  $('#figs').innerHTML = ''; setScene('her-theater');
+  clearFigures(); setScene('her-theater');
   const fv = store.get('fav', []); const all = [...D.decks.General, ...D.decks.Relation];
   ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="بازگشت">${ICON.back}</button><span></span></div>
     <div class="pill">نشان‌شده‌ها</div><div class="favs" id="favs"></div>`;
@@ -684,7 +712,7 @@ addEventListener('resize', () => {
   }, 200);
 });
 lastLayout = { w: innerWidth, h: innerHeight };
-window.APP = { draw, go, goPrev, goNext, goTo, setInputMode, currentMode, openHist, askReset, resetDeck, lockScroll, get state() { return state; }, get play() { return play; }, get version() { return window.SW_VERSION || ''; }, shake, tilt, D };
+window.APP = { draw, go, goPrev, goNext, goTo, enterDeck, chooseDeck, setInputMode, currentMode, openHist, askReset, resetDeck, lockScroll, get state() { return state; }, get play() { return play; }, get version() { return window.SW_VERSION || ''; }, shake, tilt, D };
 initShake();
 const lj = $('#loadJoke'); lj.textContent = pick(J.loading);
 const t0 = Date.now();

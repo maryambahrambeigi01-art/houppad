@@ -143,6 +143,7 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
 /* permission & end */
 .panel{position:absolute;left:0;right:0;bottom:calc(var(--sab) + 14px);display:flex;flex-direction:column;align-items:center;gap:10px;padding:0 18px;text-align:center}
 .panel p{margin:0 0 4px;font-size:15px;line-height:1.5;color:#5a4a42;text-shadow:0 0 8px rgba(246,234,214,1),0 0 3px rgba(246,234,214,1)}
+.panel .btn{white-space:normal;max-width:min(100%,22em)}
 .panel .btn.ghost{border-image-source:url(../img/signs/sign-2.webp);font-size:15px;opacity:.92}
 /* loading */
 .loading{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--paper) url(../img/grain.webp);z-index:10;transition:opacity .5s;padding:0 30px;text-align:center}
