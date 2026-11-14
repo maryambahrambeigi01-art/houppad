@@ -17,7 +17,8 @@ const who = p => p.split('-')[0];
 const ICON = {
   back: '<svg viewBox="0 0 24 24"><path d="M9 5.5c2.5 2 4.6 4.3 6.3 6.6-1.8 2.2-3.9 4.3-6.4 6.3"/></svg>',
   mark: '<svg viewBox="0 0 24 24"><path d="M7 3.6c3.4-.4 6.6-.3 10 .2.3 5.4.2 11-.2 16.6-1.7-1.6-3.3-3-4.9-4.3-1.7 1.4-3.3 2.9-5 4.4C6.6 15 6.6 9.3 7 3.6z"/></svg>',
-  zoom: '<svg viewBox="0 0 24 24" style="stroke:#4a3a33;fill:none;stroke-width:2;stroke-linecap:round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15.2l5 5M8 10.6h5M10.5 8v5"/></svg>'
+  zoom: '<svg viewBox="0 0 24 24" style="stroke:#4a3a33;fill:none;stroke-width:2;stroke-linecap:round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15.2l5 5M8 10.6h5M10.5 8v5"/></svg>',
+  list: '<svg viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h10"/></svg>'
 };
 
 /* ---------------- scenes + per-scene motion ---------------- */
@@ -54,7 +55,8 @@ function setScene(name, instant) {
   img.complete ? show() : (img.onload = show, img.onerror = show);
 }
 function sizeScene(el) {
-  const W = innerWidth, H = innerHeight, r = 1170 / 2532;
+  const host = $('#scenes');
+  const W = (host && host.clientWidth) || innerWidth * 1.16, H = (host && host.clientHeight) || innerHeight * 1.16, r = 1170 / 2532;
   let w = W, h = W / r; if (h < H) { h = H; w = H * r; }
   el.style.width = w + 'px'; el.style.height = h + 'px';
 }
@@ -151,29 +153,161 @@ function dismissFigures(dir = 1) {
 }
 function loadImgs(pname) { return Promise.all(['arms-under', 'creature', 'fingers-over'].map(n => new Promise(r => { const i = new Image(); i.onload = i.onerror = r; i.src = `img/poses/${pname}.${n}.webp`; }))); }
 
-/* ---------------- shake ---------------- */
+/* ---------------- shake + tilt (depth) + input mode ---------------- */
 const shake = { status: 'off', last: 0, hits: [], prev: null };
 const THRESH = 14, WIN = 600, COOL = 1300;
+const tilt = { tx: 0, ty: 0, x: 0, y: 0, listening: false, sensor: false, orientAt: 0, baseG: null, baseB: null, raf: 0 };
+const TILT_MAX = 0.032, TILT_RANGE = 22, TILT_FG = 0.28, TILT_LERP = 0.12;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+
+function currentMode() {
+  if (shake.status === 'unsupported') return 'tap';
+  const m = store.get('inputMode', null);
+  if (m === 'shake' || m === 'tap') return m;
+  if (store.get('permOK', false) || shake.status === 'on') return 'shake';
+  return 'tap';
+}
 function onMotion(e) {
   let mag = null; const a = e.acceleration;
+  const g = e.accelerationIncludingGravity;
   if (a && a.x != null) mag = Math.hypot(a.x, a.y, a.z);
-  else { const g = e.accelerationIncludingGravity; if (!g || g.x == null) return;
-    if (shake.prev) mag = Math.hypot(g.x - shake.prev.x, g.y - shake.prev.y, g.z - shake.prev.z);
-    shake.prev = { x: g.x, y: g.y, z: g.z }; if (mag == null) return; }
-  const now = Date.now(); if (mag < THRESH) return;
+  else {
+    if (!g || g.x == null) { /* still try tilt below */ }
+    else {
+      if (shake.prev) mag = Math.hypot(g.x - shake.prev.x, g.y - shake.prev.y, g.z - shake.prev.z);
+      shake.prev = { x: g.x, y: g.y, z: g.z };
+    }
+  }
+  if (g && !RM.matches) tiltFromGravity(g);
+  if (mag == null || mag < THRESH) return;
+  const now = Date.now();
   shake.hits = shake.hits.filter(t => now - t < WIN); shake.hits.push(now);
-  if (shake.hits.length >= 2 && now - shake.last > COOL && state.screen === 'play') { shake.last = now; shake.hits = []; draw('shake'); }
+  if (shake.hits.length >= 2 && now - shake.last > COOL && state.screen === 'play' && currentMode() === 'shake') {
+    shake.last = now; shake.hits = []; goNext('shake');
+  }
 }
-function listen() { if (shake.status !== 'on') { addEventListener('devicemotion', onMotion); shake.status = 'on'; } }
+function listenMotion() {
+  if (shake.status !== 'on') { addEventListener('devicemotion', onMotion); shake.status = 'on'; }
+  listenTilt();
+}
 function initShake() {
   if (!('DeviceMotionEvent' in window)) shake.status = 'unsupported';
   else if (typeof DeviceMotionEvent.requestPermission === 'function') shake.status = 'needs';
-  else listen();
+  else listenMotion();
+  if (!RM.matches) listenTilt(); // pointer + orientation listener; iOS only *fires* after permission
+}
+async function requestSensorPerm() {
+  const out = { motion: 'granted', orient: 'granted' };
+  const jobs = [];
+  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function')
+    jobs.push(DeviceMotionEvent.requestPermission().then(r => { out.motion = r; }).catch(() => { out.motion = 'denied'; }));
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function')
+    jobs.push(DeviceOrientationEvent.requestPermission().then(r => { out.orient = r; }).catch(() => { out.orient = 'denied'; }));
+  if (jobs.length) await Promise.all(jobs);
+  return out;
 }
 async function enableShake() { // must run inside a tap (iOS)
-  if (shake.status !== 'needs' && shake.status !== 'denied') return shake.status;
-  try { const r = await DeviceMotionEvent.requestPermission(); r === 'granted' ? listen() : (shake.status = 'denied'); } catch (e) { shake.status = 'denied'; }
+  if (shake.status === 'on') { listenTilt(); return 'on'; }
+  if (shake.status === 'unsupported') return shake.status;
+  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+    try {
+      const r = await requestSensorPerm();
+      r.motion === 'granted' ? listenMotion() : (shake.status = 'denied');
+      if (r.orient === 'granted') listenTilt();
+    } catch (e) { shake.status = 'denied'; }
+  } else {
+    listenMotion();
+  }
   return shake.status;
+}
+function maybeReask() {
+  if (currentMode() === 'shake' && shake.status !== 'on' && shake.status !== 'unsupported') enableShake();
+}
+async function setInputMode(mode) {
+  if (mode !== 'shake' || shake.status === 'unsupported') {
+    store.set('inputMode', 'tap');
+    updateModeUI();
+    return 'tap';
+  }
+  const st = await enableShake();
+  if (st === 'on') {
+    store.set('inputMode', 'shake');
+    store.set('permOK', true);
+    store.set('permSeen', true);
+  } else {
+    store.set('inputMode', 'tap');
+    const h = $('#hint');
+    if (h) h.innerHTML = '<small>اجازه داده نشد. از تنظیمات مرورگر می‌تونی بعداً روشن کنی. تا اون موقع با لمس کارت بکش.</small>';
+  }
+  updateModeUI();
+  return currentMode();
+}
+function modeButtonsHtml(idPfx = '') {
+  const mode = currentMode();
+  return `<div class="mode" role="group" aria-label="شیوه‌ی کشیدن کارت">
+      <button type="button" id="${idPfx}modeShake" class="${mode === 'shake' ? 'on' : ''}" aria-pressed="${mode === 'shake'}">تکون</button>
+      <button type="button" id="${idPfx}modeTap" class="${mode === 'tap' ? 'on' : ''}" aria-pressed="${mode === 'tap'}">لمس</button>
+    </div>`;
+}
+function bindModeButtons(pfx = '') {
+  const sh = $('#' + pfx + 'modeShake'), tp = $('#' + pfx + 'modeTap');
+  if (sh) sh.onclick = () => setInputMode('shake');
+  if (tp) tp.onclick = () => setInputMode('tap');
+}
+function updateModeUI() {
+  const mode = currentMode();
+  document.querySelectorAll('[id$="modeShake"]').forEach(el => { el.classList.toggle('on', mode === 'shake'); el.setAttribute('aria-pressed', String(mode === 'shake')); });
+  document.querySelectorAll('[id$="modeTap"]').forEach(el => { el.classList.toggle('on', mode === 'tap'); el.setAttribute('aria-pressed', String(mode === 'tap')); });
+  updateHint();
+}
+
+function listenTilt() {
+  if (RM.matches || tilt.listening) return;
+  tilt.listening = true;
+  addEventListener('deviceorientation', onOrient);
+  addEventListener('pointermove', onPointer, { passive: true });
+  if (!tilt.raf) tilt.raf = requestAnimationFrame(tickTilt);
+}
+function applyOrient(gamma, beta) {
+  if (RM.matches || gamma == null || beta == null) return;
+  tilt.sensor = true;
+  if (tilt.baseG == null) { tilt.baseG = gamma; tilt.baseB = beta; }
+  tilt.baseG += (gamma - tilt.baseG) * 0.016;
+  tilt.baseB += (beta - tilt.baseB) * 0.016;
+  tilt.tx = clamp((gamma - tilt.baseG) / TILT_RANGE, -1, 1) * TILT_MAX;
+  tilt.ty = clamp((beta - tilt.baseB) / TILT_RANGE, -1, 1) * TILT_MAX;
+}
+function onOrient(e) {
+  if (e.gamma == null || e.beta == null) return;
+  tilt.orientAt = Date.now();
+  applyOrient(e.gamma, e.beta);
+}
+function tiltFromGravity(g) {
+  if (g.x == null || g.y == null || g.z == null) return;
+  if (tilt.orientAt && Date.now() - tilt.orientAt < 1500) return;
+  const gamma = Math.atan2(g.x, Math.hypot(g.y, g.z)) * 180 / Math.PI;
+  const beta = Math.atan2(-g.z, Math.hypot(g.x, g.y)) * 180 / Math.PI;
+  applyOrient(gamma, beta);
+}
+function onPointer(e) {
+  if (tilt.sensor || RM.matches || e.pointerType === 'touch') return;
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  if (!cx || !cy) return;
+  tilt.tx = clamp((e.clientX - cx) / cx, -1, 1) * TILT_MAX * 0.7;
+  tilt.ty = clamp((e.clientY - cy) / cy, -1, 1) * TILT_MAX * 0.7;
+}
+function tickTilt() {
+  tilt.raf = requestAnimationFrame(tickTilt);
+  if (RM.matches) { tilt.x = tilt.y = tilt.tx = tilt.ty = 0; applyTiltTransforms(0, 0); return; }
+  tilt.x += (tilt.tx - tilt.x) * TILT_LERP;
+  tilt.y += (tilt.ty - tilt.y) * TILT_LERP;
+  applyTiltTransforms(tilt.x, tilt.y);
+}
+function applyTiltTransforms(x, y) {
+  const bx = x * innerWidth, by = y * innerHeight;
+  const sc = $('#scenes'), fg = $('#figs');
+  if (sc) sc.style.transform = 'translate3d(' + bx.toFixed(2) + 'px,' + by.toFixed(2) + 'px,0)';
+  if (fg) fg.style.transform = 'translate3d(' + (-bx * TILT_FG).toFixed(2) + 'px,' + (-by * TILT_FG).toFixed(2) + 'px,0)';
 }
 
 /* ---------------- state / navigation ---------------- */
@@ -181,7 +315,7 @@ let state = { screen: 'loading' };
 function go(s, replace) { state = s; try { history[replace ? 'replaceState' : 'pushState'](s, ''); } catch (e) {} render(); }
 addEventListener('popstate', e => { const s = e.state; if (s && s.screen && s.screen !== 'loading') { state = s; render(); } });
 const ui = () => $('#ui');
-function render() { document.body.dataset.screen = state.screen; closeZoom(); ({ home, perm, play: playScreen, favs: favScreen })[state.screen](); }
+function render() { document.body.dataset.screen = state.screen; closeZoom(); closeHist(); ({ home, perm, play: playScreen, favs: favScreen })[state.screen](); }
 function layoutBox() {
   const cs = getComputedStyle(document.documentElement);
   const sat = parseFloat(cs.getPropertyValue('--sat-px')) || 0;
@@ -194,8 +328,14 @@ function home() {
   setScene('her-museum');
   const n = D.decks.General.length + D.decks.Relation.length, favN = store.get('fav', []).length;
   ui().innerHTML = `<div class="titlebox"><h1 class="title" dir="ltr">Houppad</h1><p class="tag">${esc(J.home_tagline[0])}</p></div>
-    <div class="foot">${fa(n)} کارت · بی‌نهایت سکوت معذب${favN ? ` · <button class="link" id="favLink">نشان‌شده‌ها (${fa(favN)})</button>` : ''}</div>`;
+    <div class="foot">${fa(n)} کارت · بی‌نهایت سکوت معذب${favN ? ` · <button class="link" id="favLink">نشان‌شده‌ها (${fa(favN)})</button>` : ''}
+      <div class="mode mode-home" role="group" aria-label="شیوه‌ی کشیدن کارت">
+        <button type="button" id="modeShake" class="${currentMode() === 'shake' ? 'on' : ''}" aria-pressed="${currentMode() === 'shake'}">تکون دادن</button>
+        <button type="button" id="modeTap" class="${currentMode() === 'tap' ? 'on' : ''}" aria-pressed="${currentMode() === 'tap'}">لمس کردن</button>
+      </div>
+    </div>`;
   const fl = $('#favLink'); if (fl) fl.onclick = () => go({ screen: 'favs' });
+  bindModeButtons();
   $('#figs').innerHTML = '';
   const { W, H } = { W: innerWidth, H: innerHeight }, sf = safe();
   const titleBottom = ui().querySelector('.titlebox').getBoundingClientRect().bottom + 14;
@@ -212,7 +352,7 @@ function home() {
 function chooseDeck(deck) {
   const seen = store.get('permSeen', false);
   if (!seen && shake.status !== 'unsupported') return go({ screen: 'perm', deck });
-  if (shake.status === 'needs' && store.get('permOK', false)) enableShake(); // this tap is a user gesture: re-ask silently-ish on iOS
+  maybeReask(); // this tap is a user gesture: re-ask iOS motion permission when needed
   go({ screen: 'play', deck });
 }
 
@@ -230,51 +370,111 @@ function perm() {
   mountFigure(el, 'enter');
   $('#back').onclick = () => history.back();
   const deck = state.deck;
-  $('#yes').onclick = async () => { store.set('permSeen', true); const st = await enableShake(); store.set('permOK', st === 'on'); go({ screen: 'play', deck }, true); };
-  $('#no').onclick = () => { store.set('permSeen', true); if (shake.status === 'needs') shake.status = 'declined'; go({ screen: 'play', deck }, true); };
+  $('#yes').onclick = async () => { store.set('permSeen', true); const st = await enableShake(); store.set('permOK', st === 'on'); store.set('inputMode', st === 'on' ? 'shake' : 'tap'); go({ screen: 'play', deck }, true); };
+  $('#no').onclick = () => { store.set('permSeen', true); store.set('inputMode', 'tap'); if (shake.status === 'needs') shake.status = 'declined'; go({ screen: 'play', deck }, true); };
 }
 
 /* ---------------- play ---------------- */
 let play = null, busy = false, lastScene = null, lastWho = null;
-const saveP = () => store.set('deck:' + play.deck, { order: play.order, pos: play.pos });
+const saveP = () => store.set('deck:' + play.deck, { order: play.order, pos: play.pos, maxPos: play.maxPos, views: play.views });
 function loadP(deck, fresh) {
   const ids = D.decks[deck].map(c => c[0]);
-  if (!fresh) { const s = store.get('deck:' + deck, null); if (s && s.order && s.order.length === ids.length && s.order.every(id => ids.includes(id))) return { deck, ...s }; }
-  return { deck, order: shuffle(ids), pos: -1 };
+  if (!fresh) {
+    const s = store.get('deck:' + deck, null);
+    if (s && s.order && s.order.length === ids.length && s.order.every(id => ids.includes(id))) {
+      return { deck, order: s.order, pos: s.pos, maxPos: s.maxPos != null ? s.maxPos : s.pos, views: s.views || {} };
+    }
+  }
+  return { deck, order: shuffle(ids), pos: -1, maxPos: -1, views: {} };
 }
 const qById = (deck, id) => D.decks[deck].find(c => c[0] === id);
 function playScreen() {
   if (!play || play.deck !== state.deck) play = loadP(state.deck);
+  if (play.maxPos == null) play.maxPos = play.pos;
+  if (!play.views) play.views = {};
   ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="بازگشت">${ICON.back}</button>
       <button class="ib" id="mark" aria-label="نشان کردن">${ICON.mark}</button></div>
-    <div class="pill" id="pill"></div>
-    <div class="bottom"><div class="hint" id="hint"></div><button class="btn next" id="next">${esc(J.next_button)}</button></div>`;
+    <button type="button" class="pill" id="pill" aria-label="کارت‌های کشیده‌شده"></button>
+    <div class="bottom">
+      ${modeButtonsHtml()}
+      <button type="button" class="btn prev" id="prev">→ قبلی</button>
+      <div class="hint" id="hint"></div>
+      <button type="button" class="btn next" id="next">${esc(J.next_button)}</button>
+    </div>`;
   $('#back').onclick = () => go({ screen: 'home' });
-  $('#next').onclick = () => { if (shake.status === 'needs') enableShake(); draw('tap'); };
+  $('#next').onclick = () => { maybeReask(); goNext('tap'); };
+  $('#prev').onclick = () => goPrev();
   $('#mark').onclick = toggleMark;
+  $('#pill').onclick = openHist;
+  bindModeButtons();
   updateHint();
-  $('#figs').innerHTML = ''; sceneName = sceneName; // keep current scene until first card picks one
+  $('#figs').innerHTML = '';
   if (play.pos < 0) draw('first');
   else if (play.pos >= play.order.length) showEnd(false);
   else showCard('pop');
 }
 function updateHint() {
   const h = $('#hint'); if (!h) return;
-  if (shake.status === 'on') h.innerHTML = `${esc(J.shake_hint[0])}<small>${esc(J.shake_hint[1])}</small>`;
-  else if (shake.status === 'needs' || shake.status === 'declined') { h.innerHTML = `<button id="en">${esc(J.shake_hint[0])}</button><small>(یه ضربه این‌جا، تا تکون‌دادن روشن شه)</small>`;
-    $('#en').onclick = async () => { await enableShake(); updateHint(); }; }
-  else h.innerHTML = `<small style="font-size:13px">${esc(J.empty_tap_hint)}</small>`;
+  const mode = currentMode();
+  if (mode === 'shake' && shake.status === 'on') h.innerHTML = `<small>${esc(J.shake_hint[1])}</small>`;
+  else if (mode === 'shake' && (shake.status === 'needs' || shake.status === 'denied' || shake.status === 'declined'))
+    h.innerHTML = '<small>یه ضربه روی «تکون»، تا اجازه ثبت بشه</small>';
+  else h.innerHTML = '';
+}
+function updateNav() {
+  const p = $('#prev'); if (!p || !play) return;
+  const on = play.pos > 0;
+  p.disabled = !on;
+  p.classList.toggle('off', !on);
+  p.setAttribute('aria-disabled', String(!on));
+  const n = $('#next');
+  if (n) n.style.visibility = play.pos >= play.order.length ? 'hidden' : '';
 }
 function updateTop() {
   const n = play.order.length, p = $('#pill'); if (!p) return;
-  p.textContent = play.pos >= n ? `${DECKS[play.deck]} · تموم شد` : `${DECKS[play.deck]}  —  ${fa(Math.max(1, play.pos + 1))} از ${fa(n)}`;
+  const label = play.pos >= n ? `${DECKS[play.deck]} · تموم شد` : `${DECKS[play.deck]}  —  ${fa(Math.max(1, play.pos + 1))} از ${fa(n)}`;
+  p.innerHTML = `<span class="hist-ico">${ICON.list}</span>${label}`;
   const m = $('#mark'), id = play.order[play.pos];
   if (m) { m.classList.toggle('on', play.pos < n && store.get('fav', []).includes(id)); m.style.visibility = play.pos < n ? '' : 'hidden'; }
+  updateNav();
 }
 function toggleMark() {
   const id = play.order[play.pos]; if (!id) return; let fv = store.get('fav', []);
   fv = fv.includes(id) ? fv.filter(x => x !== id) : [...fv, id]; store.set('fav', fv); updateTop();
   if (navigator.vibrate) try { navigator.vibrate(10); } catch (e) {}
+}
+function finishMove(p) { Promise.resolve(p).then(() => { busy = false; }); }
+function goPrev() {
+  if (busy || state.screen !== 'play' || !play || play.pos <= 0) return;
+  closeHist(); closeZoom();
+  busy = true;
+  const wait = dismissFigures(-1);
+  play.pos--; saveP();
+  setTimeout(() => finishMove(play.pos >= play.order.length ? showEnd(true) : showCard('enter', -1)), wait);
+}
+function goNext(how) {
+  if (busy || state.screen !== 'play' || !play) return;
+  if (play.pos >= play.order.length) return;
+  if (play.pos < play.maxPos) {
+    closeHist(); closeZoom();
+    busy = true;
+    const wait = dismissFigures(1);
+    play.pos++; saveP();
+    setTimeout(() => finishMove(play.pos >= play.order.length ? showEnd(true) : showCard('enter', 1)), wait);
+    return;
+  }
+  draw(how);
+}
+function goTo(index) {
+  if (busy || state.screen !== 'play' || !play) return;
+  if (index < 0 || index > play.maxPos) return;
+  if (index === play.pos) return;
+  closeHist(); closeZoom();
+  const dir = index >= play.pos ? 1 : -1;
+  busy = true;
+  const wait = dismissFigures(dir);
+  play.pos = index; saveP();
+  setTimeout(() => finishMove(play.pos >= play.order.length ? showEnd(true) : showCard('enter', dir)), wait);
 }
 function draw(how) {
   if (busy || state.screen !== 'play') return;
@@ -283,8 +483,10 @@ function draw(how) {
   busy = true;
   if (navigator.vibrate && how === 'shake') try { navigator.vibrate([30, 40, 30]); } catch (e) {}
   const wait = how === 'first' ? 0 : dismissFigures(1);
-  play.pos++; saveP();
-  setTimeout(() => { (play.pos >= n ? showEnd(true) : showCard('enter')).then(() => { busy = false; }); }, wait);
+  play.pos++;
+  if (play.pos > play.maxPos) play.maxPos = play.pos;
+  saveP();
+  setTimeout(() => finishMove(play.pos >= n ? showEnd(true) : showCard('enter', 1)), wait);
 }
 function pickScene() { let s; do { s = pick(D.scenes); } while (s === lastScene && D.scenes.length > 1); lastScene = s; return s; }
 function pickPose() { let p; do { p = pick(POSES); } while (who(p) === lastWho); lastWho = who(p); return p; }
@@ -294,11 +496,14 @@ function cardPlace(sf) {
   const feet = Math.min(bottomUI + 6, H * .93);
   return { cx: W / 2, feet, cw: Math.min(W * .66, 270, (feet - sf.t - 60) * .42), top: sf.t + 62, maxW: W - 24, prefW: W * .8 };
 }
-async function showCard(anim) {
+async function showCard(anim, dir = 1) {
+  const panel = ui().querySelector('.panel'); if (panel) panel.remove();
   const [id, text] = qById(play.deck, play.order[play.pos]);
   const sf = safe();
-  const pname = play.posePos === play.pos && play.pose ? play.pose : pickPose();
-  const scene = play.posePos === play.pos && play.scene ? play.scene : pickScene();
+  const saved = play.views && play.views[play.pos];
+  const pname = saved && saved.pose && D.poses[saved.pose] ? saved.pose : pickPose();
+  const scene = saved && saved.scene && D.scenes.includes(saved.scene) ? saved.scene : pickScene();
+  play.views[play.pos] = { pose: pname, scene };
   play.pose = pname; play.scene = scene; play.posePos = play.pos;
   updateTop();
   await loadImgs(pname);
@@ -307,11 +512,11 @@ async function showCard(anim) {
   const lines = paras.map((t, i) => ({ t, cls: paras.length > 2 && i > 0 ? 'opt' : '' }));
   const el = makeFigure(pname, lines, cardPlace(sf), { seed: id.charCodeAt(0) * 1000 + parseInt(id.slice(1)) });
   el.querySelector('.sign').onclick = e => { e.stopPropagation(); openZoom(text); };
-  mountFigure(el, anim, 1);
+  mountFigure(el, anim, dir);
 }
 function showEnd(anim) {
   updateTop(); const sf = safe(), W = innerWidth;
-  const b = ui().querySelector('.bottom'); b.innerHTML = '';
+  const old = ui().querySelector('.panel'); if (old) old.remove();
   const panel = document.createElement('div'); panel.className = 'panel';
   panel.innerHTML = `<p>${esc(J.deck_end[1])}</p><button class="btn" id="again">از اول، با یه بُر تازه</button><button class="btn ghost" id="other">یه لیوان چای و یه دسته‌ی دیگه</button>`;
   ui().appendChild(panel);
@@ -322,10 +527,30 @@ function showEnd(anim) {
   return loadImgs('morrow-waiting').then(() => { const el = makeFigure('morrow-waiting', [{ t: J.deck_end[0] }], { cx: W / 2, feet: top, cw: Math.min(W * .58, 240), top: sf.t + 62, maxW: W - 30, prefW: W * .78, minFs: 22, maxFs: 28 }, { seed: 99 });
     mountFigure(el, anim ? 'enter' : null); });
 }
+function openHist() {
+  if (!play || play.maxPos < 0) return;
+  closeHist(); closeZoom();
+  const box = document.createElement('div'); box.className = 'hist'; box.id = 'hist';
+  const items = [];
+  const last = Math.min(play.maxPos, play.order.length - 1);
+  for (let i = 0; i <= last; i++) {
+    const q = qById(play.deck, play.order[i]); if (!q) continue;
+    const on = i === play.pos ? ' on' : '';
+    items.push(`<button type="button" class="fav${on}" data-i="${i}"><span class="n">${fa(i + 1)}</span>${esc(fa(q[1]))}</button>`);
+  }
+  box.innerHTML = `<div class="sheet"><p class="hist-title">کارت‌های کشیده‌شده</p><button type="button" class="hist-close" id="histClose">بستن</button><div class="hist-list">${items.join('') || '<p class="empty">هنوز کارتی نکشیدی.</p>'}</div></div>`;
+  box.addEventListener('click', e => {
+    const b = e.target.closest('[data-i]');
+    if (b) goTo(+b.dataset.i);
+    else if (e.target === box || e.target.id === 'histClose' || e.target.closest('#histClose')) closeHist();
+  });
+  document.body.appendChild(box);
+}
+function closeHist() { const h = $('#hist'); if (h) h.remove(); }
 
 /* ---------------- zoomed question ---------------- */
 function openZoom(text) {
-  closeZoom(); const z = document.createElement('div'); z.className = 'zoom'; z.id = 'zoom';
+  closeZoom(); closeHist(); const z = document.createElement('div'); z.className = 'zoom'; z.id = 'zoom';
   z.innerHTML = `<div class="sheet">${esc(fa(text))}</div>`; z.onclick = closeZoom; document.body.appendChild(z);
 }
 function closeZoom() { const z = $('#zoom'); if (z) z.remove(); }
@@ -343,11 +568,34 @@ function favScreen() {
   $('#back').onclick = () => go({ screen: 'home' });
 }
 
-/* ---------------- boot ---------------- */
+/* ---------------- swipe + boot ---------------- */
+let swipe = null;
+function swipeIgnore(el) { return el && el.closest && el.closest('button, .mode, .panel, .zoom, .hist, .ib, .btn, .pill, a, .bottom, .top'); }
+addEventListener('touchstart', e => {
+  if (e.touches.length !== 1 || state.screen !== 'play' || $('#zoom') || $('#hist')) { swipe = null; return; }
+  if (swipeIgnore(e.target)) { swipe = null; return; }
+  const t = e.touches[0];
+  swipe = { x: t.clientX, y: t.clientY };
+}, { passive: true });
+let swipeLock = 0;
+addEventListener('touchend', e => {
+  if (!swipe) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - swipe.x, dy = t.clientY - swipe.y;
+  swipe = null;
+  if (state.screen !== 'play' || busy || $('#zoom') || $('#hist')) return;
+  if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+  swipeLock = Date.now();
+  if (dx > 0) goPrev(); else goNext('tap');
+}, { passive: true });
+addEventListener('click', e => { if (Date.now() - swipeLock < 500) { e.preventDefault(); e.stopPropagation(); } }, true);
+
 document.addEventListener('keydown', e => { if (state.screen !== 'play') return;
-  if (e.key === ' ' || e.key === 'ArrowLeft' || e.key === 'Enter') draw('tap'); if (e.key === 's') draw('shake'); });
+  if (e.key === ' ' || e.key === 'ArrowLeft' || e.key === 'Enter') goNext('tap');
+  if (e.key === 'ArrowRight' || e.key === 'Backspace') goPrev();
+  if (e.key === 's') goNext('shake'); });
 let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { document.querySelectorAll('.scene').forEach(sizeScene); if (state.screen !== 'loading') render(); }, 200); });
-window.APP = { draw, go, get state() { return state; }, get play() { return play; }, shake, D };
+window.APP = { draw, go, goPrev, goNext, goTo, setInputMode, currentMode, openHist, get state() { return state; }, get play() { return play; }, shake, tilt, D };
 initShake();
 const lj = $('#loadJoke'); lj.textContent = pick(J.loading);
 const t0 = Date.now();
