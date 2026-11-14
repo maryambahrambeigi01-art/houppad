@@ -1,4 +1,4 @@
-/* جعبه‌ابزار گفت‌وگو — v9 app. Plain JS, no build step. */
+/* Houppad — v9 app. Plain JS, no build step. */
 (() => {
 'use strict';
 const D = window.DATA, J = D.jokes;
@@ -30,7 +30,7 @@ const FX = {
   'her-busstop': s => f('glow', .45, .12, .42, .17) + motes(.45, .14, .2, .05, 5),
   'her-clockroom': s => cut(s, [[.2, .09], [.4, .09], [.4, .215], [.2, .215]], .3, .205) + clockHand(.743, .115, .062, -17) + f('glow pulse', .12, .1, .3, .1, 'opacity:.4'),
   'her-greenhouse': s => f('rain', .5, .17, 1, .34) + cut(s, [[.0, .07], [.2, .07], [.2, .215], [0, .215]], .1, .21),
-  'her-museum': s => f('sheen', .17, .21, .17, .1) + motes(.82, .17, .14, .08, 6) + f('glow pulse', .82, .19, .3, .14, 'opacity:.5'),
+  'her-museum': s => f('sheen', .177, .266, .272, .120) + motes(.82, .17, .14, .08, 6) + f('glow pulse', .82, .19, .3, .14, 'opacity:.5'),
   'her-rooftop': s => f('cloud', .1, .07, .3, .04) + f('cloud', .1, .14, .22, .03, 'animation-delay:-18s;animation-duration:52s') + f('blink', .26, .095, .025, .012) + f('blink', .8, .14, .02, .009, 'animation-delay:-1.1s'),
   'her-theater': s => cut(s, [[0, 0], [.42, 0], [.42, .2], [0, .2]], .2, 0) + f('glow', .44, .18, .36, .15) + f('beam', .44, .1, .34, .16) + motes(.44, .15, .2, .07, 6),
   'new-cafe': s => `<div class="fx swing" style="inset:0;transform-origin:20% 0">${cut(s, [[.06, 0], [.34, 0], [.34, .135], [.06, .135]], .2, 0, 'still')}${f('glow', .2, .135, .4, .14)}</div>`,
@@ -193,7 +193,7 @@ function safe() { const p = document.createElement('div'); p.style.cssText = 'po
 function home() {
   setScene('her-museum');
   const n = D.decks.General.length + D.decks.Relation.length, favN = store.get('fav', []).length;
-  ui().innerHTML = `<div class="titlebox"><h1 class="title">جعبه‌ابزار گفت‌وگو</h1><p class="tag">${esc(J.home_tagline[0])}</p></div>
+  ui().innerHTML = `<div class="titlebox"><h1 class="title" dir="ltr">Houppad</h1><p class="tag">${esc(J.home_tagline[0])}</p></div>
     <div class="foot">${fa(n)} کارت · بی‌نهایت سکوت معذب${favN ? ` · <button class="link" id="favLink">نشان‌شده‌ها (${fa(favN)})</button>` : ''}</div>`;
   const fl = $('#favLink'); if (fl) fl.onclick = () => go({ screen: 'favs' });
   $('#figs').innerHTML = '';

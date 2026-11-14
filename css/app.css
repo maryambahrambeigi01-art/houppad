@@ -1,5 +1,7 @@
 @font-face{font-family:Marhey;src:url(../fonts/Marhey.woff2) format('woff2');font-display:block}
 @font-face{font-family:Playpen;src:url(../fonts/PlaypenSansArabic.woff2) format('woff2');font-display:block}
+/* Marhey's calt ligatures swallow Persian ی in some words (نیست، بیشتری، نیاز…). Keep rlig so لا stays connected. */
+.fig .txt,.title,.loading p,.zoom .sheet,.fav{font-feature-settings:"calt" 0}
 :root{--ink:#4a3a33;--ink2:#6a554a;--paper:#f3e3cc;--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:var(--paper);overflow:hidden;overscroll-behavior:none;touch-action:manipulation}
@@ -56,7 +58,7 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
 .shimmer{overflow:hidden;border-radius:50%;opacity:.6;mix-blend-mode:screen}
 .shimmer::before{content:"";position:absolute;inset:-40% -100%;background:repeating-linear-gradient(0deg,transparent 0 6px,rgba(255,236,200,.55) 6px 7px,transparent 7px 13px);animation:shim 3.4s ease-in-out infinite alternate}
 @keyframes shim{from{transform:translateX(-12%) translateY(0)}to{transform:translateX(12%) translateY(3px)}}
-.sheen{overflow:hidden;border-radius:46% 46% 8% 8%}
+.sheen{overflow:hidden;border-radius:50% 50% 6% 6% / 34% 34% 6% 6%;mix-blend-mode:screen}
 .sheen::before{content:"";position:absolute;top:-10%;bottom:-10%;width:30%;left:-40%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.55),transparent);animation:sheen 7s ease-in-out infinite}
 @keyframes sheen{0%,55%{transform:translateX(0)}85%,100%{transform:translateX(560%)}}
 .mote{border-radius:50%;background:rgba(255,246,220,.9);animation:mote 9s ease-in-out infinite}
@@ -113,7 +115,7 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
 .link{font-size:14px;text-decoration:underline dotted;text-underline-offset:4px;color:#5a4a42;padding:8px}
 /* home */
 .titlebox{position:absolute;top:calc(var(--sat) + 4.5vh);left:0;right:0;text-align:center;padding:0 18px}
-.title{font-family:Marhey,sans-serif;font-weight:500;font-size:min(10.5vw,46px);margin:0;line-height:1.25;color:#4a3a33;text-shadow:0 0 14px rgba(246,234,214,.95),0 0 4px rgba(246,234,214,1);transform:rotate(-1.5deg)}
+.title{font-family:Marhey,sans-serif;font-weight:500;font-size:min(14vw,56px);margin:0;line-height:1.25;color:#4a3a33;text-shadow:0 0 14px rgba(246,234,214,.95),0 0 4px rgba(246,234,214,1);transform:rotate(-1.5deg);unicode-bidi:isolate}
 .tag{font-size:min(4.4vw,18px);margin:.5em 0 0;color:#5a4a42;text-shadow:0 0 8px rgba(246,234,214,1)}
 .foot{position:absolute;bottom:calc(var(--sab) + 12px);left:0;right:0;text-align:center;font-size:13px;color:#6a564a;text-shadow:0 0 6px rgba(246,234,214,1)}
 .foot .link{font-size:13px}
