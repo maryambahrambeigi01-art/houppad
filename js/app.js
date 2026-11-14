@@ -55,7 +55,7 @@ function setScene(name, instant) {
   img.complete ? show() : (img.onload = show, img.onerror = show);
 }
 function sizeScene(el) {
-  const host = $('#scenes');
+  const host = $('#bg') || $('#scenes');
   const W = (host && host.clientWidth) || innerWidth * 1.16, H = (host && host.clientHeight) || innerHeight * 1.16, r = 1170 / 2532;
   let w = W, h = W / r; if (h < H) { h = H; w = H * r; }
   el.style.width = w + 'px'; el.style.height = h + 'px';
@@ -157,7 +157,7 @@ function loadImgs(pname) { return Promise.all(['arms-under', 'creature', 'finger
 const shake = { status: 'off', last: 0, hits: [], prev: null };
 const THRESH = 14, WIN = 600, COOL = 1300;
 const tilt = { tx: 0, ty: 0, x: 0, y: 0, listening: false, sensor: false, orientAt: 0, baseG: null, baseB: null, raf: 0 };
-const TILT_MAX = 0.032, TILT_RANGE = 22, TILT_FG = 0.28, TILT_LERP = 0.12;
+const TILT_MAX = 0.032, TILT_RANGE = 22, TILT_LERP = 0.12;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
 function currentMode() {
@@ -305,9 +305,12 @@ function tickTilt() {
 }
 function applyTiltTransforms(x, y) {
   const bx = x * innerWidth, by = y * innerHeight;
-  const sc = $('#scenes'), fg = $('#figs');
-  if (sc) sc.style.transform = 'translate3d(' + bx.toFixed(2) + 'px,' + by.toFixed(2) + 'px,0)';
-  if (fg) fg.style.transform = 'translate3d(' + (-bx * TILT_FG).toFixed(2) + 'px,' + (-by * TILT_FG).toFixed(2) + 'px,0)';
+  const bg = $('#bg');
+  if (bg) bg.style.transform = 'translate3d(' + bx.toFixed(2) + 'px,' + by.toFixed(2) + 'px,0)';
+  const fg = $('#figs'), sc = $('#scenes');
+  // character, sign and text stay put — never apply tilt to the figure layer
+  if (fg) fg.style.transform = '';
+  if (sc) sc.style.transform = '';
 }
 
 /* ---------------- state / navigation ---------------- */
@@ -315,7 +318,7 @@ let state = { screen: 'loading' };
 function go(s, replace) { state = s; try { history[replace ? 'replaceState' : 'pushState'](s, ''); } catch (e) {} render(); }
 addEventListener('popstate', e => { const s = e.state; if (s && s.screen && s.screen !== 'loading') { state = s; render(); } });
 const ui = () => $('#ui');
-function render() { document.body.dataset.screen = state.screen; closeZoom(); closeHist(); ({ home, perm, play: playScreen, favs: favScreen })[state.screen](); }
+function render() { document.body.dataset.screen = state.screen; closeZoom(); closeHist(); closeResetConfirm(); ({ home, perm, play: playScreen, favs: favScreen })[state.screen](); }
 function layoutBox() {
   const cs = getComputedStyle(document.documentElement);
   const sat = parseFloat(cs.getPropertyValue('--sat-px')) || 0;
@@ -327,19 +330,28 @@ function safe() { const p = document.createElement('div'); p.style.cssText = 'po
 function home() {
   setScene('her-museum');
   const n = D.decks.General.length + D.decks.Relation.length, favN = store.get('fav', []).length;
+  const ver = window.SW_VERSION || '';
   ui().innerHTML = `<div class="titlebox"><h1 class="title" dir="ltr">Houppad</h1><p class="tag">${esc(J.home_tagline[0])}</p></div>
+    <button type="button" class="link deck-reset" id="resetGeneral" style="left:27%" data-deck="General">از اول</button>
+    <button type="button" class="link deck-reset" id="resetRelation" style="left:73%" data-deck="Relation">از اول</button>
     <div class="foot">${fa(n)} کارت · بی‌نهایت سکوت معذب${favN ? ` · <button class="link" id="favLink">نشان‌شده‌ها (${fa(favN)})</button>` : ''}
       <div class="mode mode-home" role="group" aria-label="شیوه‌ی کشیدن کارت">
         <button type="button" id="modeShake" class="${currentMode() === 'shake' ? 'on' : ''}" aria-pressed="${currentMode() === 'shake'}">تکون دادن</button>
         <button type="button" id="modeTap" class="${currentMode() === 'tap' ? 'on' : ''}" aria-pressed="${currentMode() === 'tap'}">لمس کردن</button>
       </div>
+      <span class="ver" id="swVer" dir="ltr">${esc(ver)}</span>
     </div>`;
   const fl = $('#favLink'); if (fl) fl.onclick = () => go({ screen: 'favs' });
   bindModeButtons();
+  $('#resetGeneral').onclick = ev => { ev.stopPropagation(); askReset('General'); };
+  $('#resetRelation').onclick = ev => { ev.stopPropagation(); askReset('Relation'); };
   $('#figs').innerHTML = '';
   const { W, H } = { W: innerWidth, H: innerHeight }, sf = safe();
   const titleBottom = ui().querySelector('.titlebox').getBoundingClientRect().bottom + 14;
-  const feet = H - sf.b - 40, cw = Math.min(W * .4, 190, (feet - titleBottom) * .4);
+  const footTop = ui().querySelector('.foot').getBoundingClientRect().top;
+  document.querySelectorAll('.deck-reset').forEach(b => { b.style.bottom = (H - footTop + 4) + 'px'; });
+  const feet = Math.min(H - sf.b - 40, footTop - 28);
+  const cw = Math.min(W * .4, 190, Math.max(80, (feet - titleBottom) * .4));
   const mk = (pname, deck, cx, sid, s) => {
     const el = makeFigure(pname, [{ t: DECKS[deck] }, { t: `${D.decks[deck].length} کارت`, cls: 'small' }], { cx, feet, cw, top: titleBottom, maxW: W * .47, prefW: W * .44, minFs: 30, maxFs: 46 }, { sid, seed: s });
     const sg = el.querySelector('.sign'); sg.setAttribute('role', 'button'); sg.setAttribute('aria-label', 'دسته‌ی ' + DECKS[deck]);
@@ -518,9 +530,11 @@ function showEnd(anim) {
   updateTop(); const sf = safe(), W = innerWidth;
   const old = ui().querySelector('.panel'); if (old) old.remove();
   const panel = document.createElement('div'); panel.className = 'panel';
-  panel.innerHTML = `<p>${esc(J.deck_end[1])}</p><button class="btn" id="again">از اول، با یه بُر تازه</button><button class="btn ghost" id="other">یه لیوان چای و یه دسته‌ی دیگه</button>`;
+  panel.innerHTML = `<p>${esc(J.deck_end[1])}</p><button class="btn" id="again">از اول، با یه بُر تازه</button><button type="button" class="link" id="endReset">از اول</button><button class="btn ghost" id="other">یه لیوان چای و یه دسته‌ی دیگه</button>`;
   ui().appendChild(panel);
-  $('#again').onclick = () => { play = loadP(play.deck, true); saveP(); panel.remove(); playScreen(); };
+  const ask = () => askReset(play.deck);
+  $('#again').onclick = ask;
+  $('#endReset').onclick = ask;
   $('#other').onclick = () => go({ screen: 'home' });
   setScene('her-busstop');
   const top = panel.getBoundingClientRect().top - 8;
@@ -529,7 +543,7 @@ function showEnd(anim) {
 }
 function openHist() {
   if (!play || play.maxPos < 0) return;
-  closeHist(); closeZoom();
+  closeHist(); closeZoom(); closeResetConfirm();
   const box = document.createElement('div'); box.className = 'hist'; box.id = 'hist';
   const items = [];
   const last = Math.min(play.maxPos, play.order.length - 1);
@@ -539,39 +553,53 @@ function openHist() {
     items.push(`<button type="button" class="fav${on}" data-i="${i}"><span class="n">${fa(i + 1)}</span>${esc(fa(q[1]))}</button>`);
   }
   box.innerHTML = `<div class="sheet">
-    <p class="hist-title">کارت‌های کشیده‌شده</p>
-    <div class="hist-actions">
-      <button type="button" class="btn reset" id="histReset">از اول</button>
-      <button type="button" class="hist-close" id="histClose">بستن</button>
+    <div class="hist-head">
+      <p class="hist-title">کارت‌های کشیده‌شده</p>
+      <div class="hist-actions">
+        <button type="button" class="btn reset" id="histReset">از اول</button>
+        <button type="button" class="hist-close" id="histClose">بستن</button>
+      </div>
     </div>
     <div class="hist-list">${items.join('') || '<p class="empty">هنوز کارتی نکشیدی.</p>'}</div>
-    <div class="hist-confirm" id="histConfirm" hidden>
-      <p>همه‌ی کارت‌های این دسته دوباره بُر بخورن؟</p>
-      <button type="button" class="btn" id="histResetYes">آره، از اول</button>
-      <button type="button" class="btn ghost" id="histResetNo">نه</button>
-    </div>
   </div>`;
   box.addEventListener('click', e => {
-    if (e.target.closest('#histReset, #histResetYes, #histResetNo, #histConfirm')) return;
+    if (e.target.closest('#histReset, #resetConfirm')) return;
     const b = e.target.closest('[data-i]');
     if (b) goTo(+b.dataset.i);
     else if (e.target === box || e.target.id === 'histClose' || e.target.closest('#histClose')) closeHist();
   });
   document.body.appendChild(box);
-  $('#histReset').onclick = () => { const c = $('#histConfirm'); if (c) c.hidden = false; };
-  $('#histResetNo').onclick = () => { const c = $('#histConfirm'); if (c) c.hidden = true; };
-  $('#histResetYes').onclick = resetDeck;
+  $('#histReset').onclick = ev => { ev.stopPropagation(); askReset(play.deck); };
 }
 function closeHist() { const h = $('#hist'); if (h) h.remove(); }
-function resetDeck() {
-  if (!play || state.screen !== 'play') return;
-  const deck = play.deck;
-  closeHist(); closeZoom();
-  const wait = dismissFigures(1);
-  play = loadP(deck, true);
+function closeResetConfirm() { const el = $('#resetConfirm'); if (el) el.remove(); }
+function askReset(deck) {
+  const d = deck || (play && play.deck);
+  if (!d) return;
+  closeResetConfirm();
+  const box = document.createElement('div'); box.className = 'reset-ask'; box.id = 'resetConfirm';
+  box.innerHTML = `<p>همه‌ی کارت‌های این دسته دوباره بُر بخورن؟</p>
+    <button type="button" class="btn" id="resetYes">آره، از اول</button>
+    <button type="button" class="btn ghost" id="resetNo">نه</button>`;
+  box.addEventListener('click', e => { if (e.target === box) closeResetConfirm(); });
+  document.body.appendChild(box);
+  $('#resetYes').onclick = ev => { ev.stopPropagation(); resetDeck(d); };
+  $('#resetNo').onclick = ev => { ev.stopPropagation(); closeResetConfirm(); };
+}
+function resetDeck(deck) {
+  const d = deck || (play && play.deck);
+  if (!d) return;
+  closeResetConfirm(); closeHist(); closeZoom();
+  const fresh = loadP(d, true);
+  store.set('deck:' + d, { order: fresh.order, pos: fresh.pos, maxPos: fresh.maxPos, views: fresh.views });
   lastWho = null;
-  saveP();
-  setTimeout(() => { busy = false; playScreen(); }, wait);
+  if (state.screen === 'play' && play && play.deck === d) {
+    const wait = dismissFigures(1);
+    play = fresh;
+    setTimeout(() => { busy = false; playScreen(); }, wait);
+  } else {
+    if (play && play.deck === d) play = fresh;
+  }
 }
 
 /* ---------------- zoomed question ---------------- */
@@ -596,7 +624,7 @@ function favScreen() {
 
 /* ---------------- swipe + boot ---------------- */
 let swipe = null;
-function swipeIgnore(el) { return el && el.closest && el.closest('button, .mode, .panel, .zoom, .hist, .ib, .btn, .pill, a, .bottom, .top'); }
+function swipeIgnore(el) { return el && el.closest && el.closest('button, .mode, .panel, .zoom, .hist, .reset-ask, .ib, .btn, .pill, a, .bottom, .top, .deck-reset'); }
 addEventListener('touchstart', e => {
   if (e.touches.length !== 1 || state.screen !== 'play' || $('#zoom') || $('#hist')) { swipe = null; return; }
   if (swipeIgnore(e.target)) { swipe = null; return; }
@@ -621,7 +649,7 @@ document.addEventListener('keydown', e => { if (state.screen !== 'play') return;
   if (e.key === 'ArrowRight' || e.key === 'Backspace') goPrev();
   if (e.key === 's') goNext('shake'); });
 let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { document.querySelectorAll('.scene').forEach(sizeScene); if (state.screen !== 'loading') render(); }, 200); });
-window.APP = { draw, go, goPrev, goNext, goTo, setInputMode, currentMode, openHist, resetDeck, get state() { return state; }, get play() { return play; }, shake, tilt, D };
+window.APP = { draw, go, goPrev, goNext, goTo, setInputMode, currentMode, openHist, askReset, resetDeck, get state() { return state; }, get play() { return play; }, get version() { return window.SW_VERSION || ''; }, shake, tilt, D };
 initShake();
 const lj = $('#loadJoke'); lj.textContent = pick(J.loading);
 const t0 = Date.now();
@@ -631,5 +659,21 @@ Promise.race([Promise.all(pre), new Promise(r => setTimeout(r, 6000))]).then(() 
   setTimeout(() => { history.replaceState({ screen: 'home' }, ''); state = { screen: 'home' }; render(); $('#loading').classList.add('gone'); setTimeout(() => $('#loading').remove(), 600); },
     Math.max(0, (RM.matches ? 300 : 1400) - (Date.now() - t0)));
 });
-if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js');
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    const check = () => { try { reg.update(); } catch (e) {} };
+    check();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    addEventListener('pageshow', check);
+  }).catch(() => {});
+  // Reload once when a *new* worker takes over (not on first install).
+  if (navigator.serviceWorker.controller) {
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
+  }
+}
 })();
