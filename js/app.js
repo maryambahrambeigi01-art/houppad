@@ -307,10 +307,22 @@ function applyTiltTransforms(x, y) {
   const bx = x * innerWidth, by = y * innerHeight;
   const bg = $('#bg');
   if (bg) bg.style.transform = 'translate3d(' + bx.toFixed(2) + 'px,' + by.toFixed(2) + 'px,0)';
-  const fg = $('#figs'), sc = $('#scenes');
-  // character, sign and text stay put — never apply tilt to the figure layer
-  if (fg) fg.style.transform = '';
-  if (sc) sc.style.transform = '';
+  // never move the figure, sign, or text with tilt or pointer
+  const fg = $('#figs'), sc = $('#scenes'), st = $('#stage'), ui = $('#ui');
+  if (fg) fg.style.transform = 'none';
+  if (ui) ui.style.transform = 'none';
+  if (sc) sc.style.transform = 'none';
+  lockScroll();
+}
+function lockScroll() {
+  if (scrollX || scrollY) scrollTo(0, 0);
+  const se = document.scrollingElement || document.documentElement;
+  if (se && (se.scrollTop || se.scrollLeft)) { se.scrollTop = 0; se.scrollLeft = 0; }
+  if (document.body && (document.body.scrollTop || document.body.scrollLeft)) { document.body.scrollTop = 0; document.body.scrollLeft = 0; }
+  const st = $('#stage');
+  if (st && (st.scrollTop || st.scrollLeft)) { st.scrollTop = 0; st.scrollLeft = 0; }
+  const vv = window.visualViewport;
+  if (vv && (vv.offsetTop || vv.offsetLeft) && (scrollX || scrollY || vv.pageTop || vv.pageLeft)) scrollTo(0, 0);
 }
 
 /* ---------------- state / navigation ---------------- */
@@ -648,8 +660,31 @@ document.addEventListener('keydown', e => { if (state.screen !== 'play') return;
   if (e.key === ' ' || e.key === 'ArrowLeft' || e.key === 'Enter') goNext('tap');
   if (e.key === 'ArrowRight' || e.key === 'Backspace') goPrev();
   if (e.key === 's') goNext('shake'); });
-let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { document.querySelectorAll('.scene').forEach(sizeScene); if (state.screen !== 'loading') render(); }, 200); });
-window.APP = { draw, go, goPrev, goNext, goTo, setInputMode, currentMode, openHist, askReset, resetDeck, get state() { return state; }, get play() { return play; }, get version() { return window.SW_VERSION || ''; }, shake, tilt, D };
+function isScrollableTarget(el) {
+  return el && el.closest && el.closest('.hist-list, .favs, .zoom .sheet');
+}
+addEventListener('touchmove', e => { if (!isScrollableTarget(e.target)) e.preventDefault(); }, { passive: false });
+addEventListener('scroll', lockScroll, { passive: true, capture: true });
+if (window.visualViewport) {
+  visualViewport.addEventListener('scroll', lockScroll, { passive: true });
+  visualViewport.addEventListener('resize', lockScroll, { passive: true });
+}
+let rz, lastLayout = { w: 0, h: 0 };
+addEventListener('resize', () => {
+  lockScroll();
+  clearTimeout(rz);
+  rz = setTimeout(() => {
+    const w = innerWidth, h = innerHeight;
+    document.querySelectorAll('.scene').forEach(sizeScene);
+    // Ignore tiny visual-viewport jitter (iOS bounce / tilt). Only remount on a real layout change.
+    if (state.screen === 'loading') return;
+    if (Math.abs(w - lastLayout.w) < 40 && Math.abs(h - lastLayout.h) < 40) return;
+    lastLayout = { w, h };
+    render();
+  }, 200);
+});
+lastLayout = { w: innerWidth, h: innerHeight };
+window.APP = { draw, go, goPrev, goNext, goTo, setInputMode, currentMode, openHist, askReset, resetDeck, lockScroll, get state() { return state; }, get play() { return play; }, get version() { return window.SW_VERSION || ''; }, shake, tilt, D };
 initShake();
 const lj = $('#loadJoke'); lj.textContent = pick(J.loading);
 const t0 = Date.now();
