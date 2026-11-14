@@ -1,7 +1,7 @@
 @font-face{font-family:Marhey;src:url(../fonts/Marhey.woff2) format('woff2');font-display:block}
 @font-face{font-family:Playpen;src:url(../fonts/PlaypenSansArabic.woff2) format('woff2');font-display:block}
 /* Marhey's calt ligatures swallow Persian ی in some words (نیست، بیشتری، نیاز…). Keep rlig so لا stays connected. */
-.fig .txt,.title,.loading p,.zoom .sheet,.fav,.hist .fav,.hist-title{font-feature-settings:"calt" 0}
+.fig .txt,.title,.loading p,.zoom .sheet,.fav,.hist .fav,.hist-title,.hist-confirm p{font-feature-settings:"calt" 0}
 :root{--ink:#4a3a33;--ink2:#6a554a;--paper:#f3e3cc;--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:var(--paper);overflow:hidden;overscroll-behavior:none;touch-action:manipulation}
@@ -156,7 +156,13 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
 .hist::before{content:"";position:absolute;inset:-20px;background:url(../img/grain.webp);background-size:256px;opacity:.45;mix-blend-mode:multiply;pointer-events:none}
 .hist .sheet{position:relative;width:100%;flex:1;min-height:0;display:flex;flex-direction:column}
 .hist-title{font-family:Marhey,sans-serif;font-size:22px;text-align:center;margin:8px 8px 4px;transform:rotate(-1deg);color:#4a3a33}
-.hist-close{display:block;margin:0 auto 10px;font-size:14px;text-decoration:underline dotted;text-underline-offset:3px;color:#5a4a42;padding:6px}
+.hist-actions{display:flex;flex-direction:column;align-items:center;gap:4px;margin:0 0 10px}
+.hist-close{display:block;margin:0 auto;font-size:14px;text-decoration:underline dotted;text-underline-offset:3px;color:#5a4a42;padding:6px}
+.hist .btn.reset{font-size:16px;padding:8px 18px 7px;transform:rotate(.8deg)}
+.hist-confirm[hidden]{display:none!important}
+.hist-confirm{position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px 18px;text-align:center;background:#f3e3cc}
+.hist-confirm p{font-family:Marhey,sans-serif;font-size:19px;line-height:1.7;margin:0 0 8px;transform:rotate(-.8deg);color:#4a3a33}
+.hist-confirm .btn.ghost{border-image-source:url(../img/signs/sign-2.webp);font-size:15px}
 .hist-list{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:4px 4px 20px}
 .hist .fav{display:block;width:100%;text-align:start;cursor:pointer}
 .hist .fav.on{outline:2px dashed rgba(74,58,51,.45);outline-offset:-4px}

@@ -538,15 +538,41 @@ function openHist() {
     const on = i === play.pos ? ' on' : '';
     items.push(`<button type="button" class="fav${on}" data-i="${i}"><span class="n">${fa(i + 1)}</span>${esc(fa(q[1]))}</button>`);
   }
-  box.innerHTML = `<div class="sheet"><p class="hist-title">کارت‌های کشیده‌شده</p><button type="button" class="hist-close" id="histClose">بستن</button><div class="hist-list">${items.join('') || '<p class="empty">هنوز کارتی نکشیدی.</p>'}</div></div>`;
+  box.innerHTML = `<div class="sheet">
+    <p class="hist-title">کارت‌های کشیده‌شده</p>
+    <div class="hist-actions">
+      <button type="button" class="btn reset" id="histReset">از اول</button>
+      <button type="button" class="hist-close" id="histClose">بستن</button>
+    </div>
+    <div class="hist-list">${items.join('') || '<p class="empty">هنوز کارتی نکشیدی.</p>'}</div>
+    <div class="hist-confirm" id="histConfirm" hidden>
+      <p>همه‌ی کارت‌های این دسته دوباره بُر بخورن؟</p>
+      <button type="button" class="btn" id="histResetYes">آره، از اول</button>
+      <button type="button" class="btn ghost" id="histResetNo">نه</button>
+    </div>
+  </div>`;
   box.addEventListener('click', e => {
+    if (e.target.closest('#histReset, #histResetYes, #histResetNo, #histConfirm')) return;
     const b = e.target.closest('[data-i]');
     if (b) goTo(+b.dataset.i);
     else if (e.target === box || e.target.id === 'histClose' || e.target.closest('#histClose')) closeHist();
   });
   document.body.appendChild(box);
+  $('#histReset').onclick = () => { const c = $('#histConfirm'); if (c) c.hidden = false; };
+  $('#histResetNo').onclick = () => { const c = $('#histConfirm'); if (c) c.hidden = true; };
+  $('#histResetYes').onclick = resetDeck;
 }
 function closeHist() { const h = $('#hist'); if (h) h.remove(); }
+function resetDeck() {
+  if (!play || state.screen !== 'play') return;
+  const deck = play.deck;
+  closeHist(); closeZoom();
+  const wait = dismissFigures(1);
+  play = loadP(deck, true);
+  lastWho = null;
+  saveP();
+  setTimeout(() => { busy = false; playScreen(); }, wait);
+}
 
 /* ---------------- zoomed question ---------------- */
 function openZoom(text) {
@@ -595,7 +621,7 @@ document.addEventListener('keydown', e => { if (state.screen !== 'play') return;
   if (e.key === 'ArrowRight' || e.key === 'Backspace') goPrev();
   if (e.key === 's') goNext('shake'); });
 let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { document.querySelectorAll('.scene').forEach(sizeScene); if (state.screen !== 'loading') render(); }, 200); });
-window.APP = { draw, go, goPrev, goNext, goTo, setInputMode, currentMode, openHist, get state() { return state; }, get play() { return play; }, shake, tilt, D };
+window.APP = { draw, go, goPrev, goNext, goTo, setInputMode, currentMode, openHist, resetDeck, get state() { return state; }, get play() { return play; }, shake, tilt, D };
 initShake();
 const lj = $('#loadJoke'); lj.textContent = pick(J.loading);
 const t0 = Date.now();
