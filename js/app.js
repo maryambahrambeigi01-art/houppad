@@ -11,7 +11,59 @@ const KEY = 'jabe9:';
 const store = { get(k, d) { try { const v = localStorage.getItem(KEY + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
                 set(k, v) { try { localStorage.setItem(KEY + k, JSON.stringify(v)); } catch (e) {} } };
 const RM = matchMedia('(prefers-reduced-motion: reduce)');
-const DECKS = { General: 'کلی', Relation: 'رابطه' };
+let lang = 'fa';
+function initLang() {
+  const saved = store.get('lang', null);
+  if (saved === 'fa' || saved === 'en') lang = saved;
+  else {
+    const nav = String(navigator.language || navigator.userLanguage || '').toLowerCase();
+    lang = nav.startsWith('fa') ? 'fa' : 'en';
+    store.set('lang', lang);
+  }
+  applyDir();
+}
+function applyDir() {
+  const en = lang === 'en';
+  document.documentElement.lang = en ? 'en' : 'fa';
+  document.documentElement.dir = en ? 'ltr' : 'rtl';
+  document.body.classList.toggle('en', en);
+  document.body.classList.toggle('fa', !en);
+}
+function setLang(next) {
+  if (next !== 'fa' && next !== 'en') return;
+  if (lang === next) return;
+  lang = next;
+  store.set('lang', lang);
+  applyDir();
+  const lj = $('#loadJoke');
+  if (lj && state.screen === 'loading') lj.textContent = pick(t('loading'));
+  if (state.screen && state.screen !== 'loading') render();
+}
+function t(key) {
+  const pack = (D.copy && D.copy[lang]) || {};
+  const fallback = (D.copy && D.copy.fa) || J || {};
+  const v = pack[key] != null ? pack[key] : fallback[key];
+  return v != null ? v : key;
+}
+function fmt(s, vars) {
+  s = String(s);
+  Object.keys(vars || {}).forEach(k => { s = s.split('{' + k + '}').join(vars[k]); });
+  return s;
+}
+function deckName(deck) { return t('deck_' + deck) || deck; }
+function qText(card) { if (!card) return ''; return (lang === 'en' && card[2]) ? card[2] : card[1]; }
+function num(s) { return lang === 'fa' ? fa(s) : String(s); }
+function langButtonsHtml() {
+  return `<div class="lang" role="group" aria-label="${esc(t('lang_label'))}">
+      <button type="button" data-lang="fa" class="${lang === 'fa' ? 'on' : ''}" aria-pressed="${lang === 'fa'}">FA</button>
+      <button type="button" data-lang="en" class="${lang === 'en' ? 'on' : ''}" aria-pressed="${lang === 'en'}">EN</button>
+    </div>`;
+}
+function bindLangButtons(root) {
+  (root || document).querySelectorAll('.lang [data-lang]').forEach(b => {
+    b.onclick = ev => { ev.stopPropagation(); setLang(b.getAttribute('data-lang')); };
+  });
+}
 const POSES = Object.keys(D.poses);
 const who = p => p.split('-')[0];
 const ICON = {
@@ -66,7 +118,7 @@ const SL = { t: .26, r: .19, b: .26, l: .19 }; // border-image slice fractions o
 let seed = 1; const R = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
 function buildText(el, lines) {
   // lines: [{t, cls}] ; words wrapped in spans so we can jitter them like hand lettering afterwards
-  el.innerHTML = lines.map(l => `<span class="p ${l.cls || ''}">${String(l.t).split(/\s+/).filter(Boolean).map(w => `<span class="w">${esc(fa(w))}</span>`).join(' ')}</span>`).join('');
+  el.innerHTML = lines.map(l => `<span class="p ${l.cls || ''}">${String(l.t).split(/\s+/).filter(Boolean).map(w => `<span class="w">${esc(num(w))}</span>`).join(' ')}</span>`).join('');
 }
 function jitter(el, s) {
   seed = s || 7;
@@ -86,7 +138,8 @@ function measure(lines, width, fs) {
   if (!meas.parentNode) document.body.appendChild(meas);
   meas.innerHTML = '<div class="txt" style="position:static;display:block"></div>';
   const t = meas.firstChild; t.style.width = width + 'px'; t.style.fontSize = fs + 'px';
-  buildText(t, lines); return t.scrollHeight;
+  buildText(t, lines);
+  return { h: t.scrollHeight, wide: t.scrollWidth > width + 1 };
 }
 /* place: {cx, feet, cw (creature css width), top (min y for sign top), maxW (max sign width), minFs, maxFs} */
 function layoutFigure(pname, lines, place, sid) {
@@ -97,9 +150,9 @@ function layoutFigure(pname, lines, place, sid) {
   const fit = (k, Ws, fs) => {
     const figTop = place.feet - P.feet * k, by = figTop + P.b[1] * k;
     const base = P.sw * k, ins = { l: S.tb[0] * base, r: (1 - S.tb[2]) * base, t: S.tb[1] * P.sh * k, b: (1 - S.tb[3]) * P.sh * k };
-    const h = measure(lines, Ws - ins.l - ins.r, fs);
-    const Hs = Math.max(P.sh * k, h + ins.t + ins.b);
-    return { k, Ws, Hs, fs, ins, ok: by - Hs >= place.top, by, figTop };
+    const m = measure(lines, Ws - ins.l - ins.r, fs);
+    const Hs = Math.max(P.sh * k, m.h + ins.t + ins.b);
+    return { k, Ws, Hs, fs, ins, ok: by - Hs >= place.top && !m.wide, by, figTop };
   };
   const maxW = place.maxW, minFs = place.minFs || 20, maxFs = place.maxFs || 27;
   for (const pass of [[maxFs, Math.max(minFs, 22)], [21, minFs]]) {
@@ -108,8 +161,12 @@ function layoutFigure(pname, lines, place, sid) {
       for (const Ws of Wopts) for (let fs = pass[0]; fs >= pass[1]; fs--) { const r = fit(k, Ws, fs); if (r.ok) return Object.assign(r, { P, S, small: false }); }
     }
   }
+  for (const k of tries) {
+    for (let fs = minFs - 1; fs >= 13; fs--) { const r = fit(k, maxW, fs); if (r.ok) return Object.assign(r, { P, S, small: true }); }
+  }
   const k = tries[tries.length - 1];
-  for (let fs = minFs - 1; fs >= 13; fs--) { const r = fit(k, maxW, fs); if (r.ok || fs === 13) return Object.assign(r, { P, S, small: true }); }
+  const r = fit(k, maxW, 13);
+  return Object.assign(r, { P, S, small: true });
 }
 function makeFigure(pname, lines, place, opts = {}) {
   const sid = opts.sid || D.poses[pname].sid;
@@ -239,16 +296,16 @@ async function setInputMode(mode) {
   } else {
     store.set('inputMode', 'tap');
     const h = $('#hint');
-    if (h) h.innerHTML = '<small>اجازه داده نشد. از تنظیمات مرورگر می‌تونی بعداً روشن کنی. تا اون موقع با لمس کارت بکش.</small>';
+    if (h) h.innerHTML = `<small>${esc(t('perm_denied'))}</small>`;
   }
   updateModeUI();
   return currentMode();
 }
 function modeButtonsHtml(idPfx = '') {
   const mode = currentMode();
-  return `<div class="mode" role="group" aria-label="شیوه‌ی کشیدن کارت">
-      <button type="button" id="${idPfx}modeShake" class="${mode === 'shake' ? 'on' : ''}" aria-pressed="${mode === 'shake'}">تکون</button>
-      <button type="button" id="${idPfx}modeTap" class="${mode === 'tap' ? 'on' : ''}" aria-pressed="${mode === 'tap'}">لمس</button>
+  return `<div class="mode" role="group" aria-label="${esc(t('mode_label'))}">
+      <button type="button" id="${idPfx}modeShake" class="${mode === 'shake' ? 'on' : ''}" aria-pressed="${mode === 'shake'}">${esc(t('shake'))}</button>
+      <button type="button" id="${idPfx}modeTap" class="${mode === 'tap' ? 'on' : ''}" aria-pressed="${mode === 'tap'}">${esc(t('tap'))}</button>
     </div>`;
 }
 function bindModeButtons(pfx = '') {
@@ -345,18 +402,19 @@ function home() {
   setScene('her-museum');
   const n = D.decks.General.length + D.decks.Relation.length, favN = store.get('fav', []).length;
   const ver = window.SW_VERSION || '';
-  ui().innerHTML = `<div class="titlebox"><h1 class="title" dir="ltr">Houppad</h1><p class="tag">${esc(J.home_tagline[0])}</p></div>
-    <button type="button" class="link deck-reset" id="resetGeneral" style="left:27%" data-deck="General">از اول</button>
-    <button type="button" class="link deck-reset" id="resetRelation" style="left:73%" data-deck="Relation">از اول</button>
-    <div class="foot">${fa(n)} کارت · بی‌نهایت سکوت معذب${favN ? ` · <button class="link" id="favLink">نشان‌شده‌ها (${fa(favN)})</button>` : ''}
-      <div class="mode mode-home" role="group" aria-label="شیوه‌ی کشیدن کارت">
-        <button type="button" id="modeShake" class="${currentMode() === 'shake' ? 'on' : ''}" aria-pressed="${currentMode() === 'shake'}">تکون دادن</button>
-        <button type="button" id="modeTap" class="${currentMode() === 'tap' ? 'on' : ''}" aria-pressed="${currentMode() === 'tap'}">لمس کردن</button>
+  ui().innerHTML = `<div class="titlebox"><h1 class="title" dir="ltr">Houppad</h1><p class="tag">${esc(t('home_tagline')[0])}</p>${langButtonsHtml()}</div>
+    <button type="button" class="link deck-reset" id="resetGeneral" style="left:27%" data-deck="General">${esc(t('start_over'))}</button>
+    <button type="button" class="link deck-reset" id="resetRelation" style="left:73%" data-deck="Relation">${esc(t('start_over'))}</button>
+    <div class="foot">${esc(fmt(t('home_footer'), { n: num(n) }))}${favN ? ` · <button class="link" id="favLink">${esc(fmt(t('bookmarks_n'), { n: num(favN) }))}</button>` : ''}
+      <div class="mode mode-home" role="group" aria-label="${esc(t('mode_label'))}">
+        <button type="button" id="modeShake" class="${currentMode() === 'shake' ? 'on' : ''}" aria-pressed="${currentMode() === 'shake'}">${esc(t('shake_long'))}</button>
+        <button type="button" id="modeTap" class="${currentMode() === 'tap' ? 'on' : ''}" aria-pressed="${currentMode() === 'tap'}">${esc(t('tap_long'))}</button>
       </div>
       <span class="ver" id="swVer" dir="ltr">${esc(ver)}</span>
     </div>`;
   const fl = $('#favLink'); if (fl) fl.onclick = () => go({ screen: 'favs' });
   bindModeButtons();
+  bindLangButtons();
   $('#resetGeneral').onclick = ev => { ev.stopPropagation(); askReset('General'); };
   $('#resetRelation').onclick = ev => { ev.stopPropagation(); askReset('Relation'); };
   clearFigures();
@@ -366,14 +424,22 @@ function home() {
   document.querySelectorAll('.deck-reset').forEach(b => { b.style.bottom = (H - footTop + 4) + 'px'; });
   const feet = Math.min(H - sf.b - 40, footTop - 28);
   const cw = Math.min(W * .4, 190, Math.max(80, (feet - titleBottom) * .4));
-  const mk = (pname, deck, cx, sid, s) => {
-    const el = makeFigure(pname, [{ t: DECKS[deck] }, { t: `${D.decks[deck].length} کارت`, cls: 'small' }], { cx, feet, cw, top: titleBottom, maxW: W * .47, prefW: W * .44, minFs: 30, maxFs: 46 }, { sid, seed: s });
-    const sg = el.querySelector('.sign'); sg.setAttribute('role', 'button'); sg.setAttribute('aria-label', 'دسته‌ی ' + DECKS[deck]);
+  const mk = (pname, deck, cx, sid, s, fsLock) => {
+    const en = lang === 'en';
+    const el = makeFigure(pname, [{ t: deckName(deck) }, { t: fmt(t('n_cards'), { n: num(D.decks[deck].length) }), cls: 'small' }], { cx, feet, cw, top: titleBottom, maxW: W * .47, prefW: W * .44, minFs: fsLock || (en ? 20 : 30), maxFs: fsLock || (en ? 40 : 46) }, { sid, seed: s });
+    const sg = el.querySelector('.sign'); sg.setAttribute('role', 'button'); sg.setAttribute('aria-label', fmt(t('deck_aria'), { name: deckName(deck) }));
     sg.onclick = () => chooseDeck(deck);
     return el;
   };
-  mountFigure(mk('morrow-proud-but-hiding-it', 'General', W * .27, 1, 11), 'pop');
-  const right = mk('vesper-plotting', 'Relation', W * .73, 2, 23); const gen = figGen; setTimeout(() => { if (gen === figGen) mountFigure(right, 'pop'); }, RM.matches ? 0 : 140);
+  let left = mk('morrow-proud-but-hiding-it', 'General', W * .27, 1, 11);
+  let right = mk('vesper-plotting', 'Relation', W * .73, 2, 23);
+  if (lang === 'en') {
+    const fs = Math.min(left._layout.fs, right._layout.fs);
+    if (left._layout.fs !== fs) left = mk('morrow-proud-but-hiding-it', 'General', W * .27, 1, 11, fs);
+    if (right._layout.fs !== fs) right = mk('vesper-plotting', 'Relation', W * .73, 2, 23, fs);
+  }
+  mountFigure(left, 'pop');
+  const gen = figGen; setTimeout(() => { if (gen === figGen) mountFigure(right, 'pop'); }, RM.matches ? 0 : 140);
 }
 function needsAgeGate(deck) { return deck === 'Relation' && !store.get('rel18', false); }
 function enterDeck(deck, replace) {
@@ -391,13 +457,14 @@ function ageScreen() {
   setScene('new-cafe');
   clearFigures();
   const W = innerWidth, H = innerHeight, sf = safe();
-  ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="بازگشت">${ICON.back}</button><span></span></div>
+  ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="${esc(t('back'))}">${ICON.back}</button>${langButtonsHtml()}</div>
     <div class="panel">
-      <button type="button" class="btn" id="ageYes">آره، بزرگ شدم</button>
-      <button type="button" class="btn ghost" id="ageNo">نه، برمی‌گردم سراغ کلی</button>
+      <button type="button" class="btn" id="ageYes">${esc(t('age_yes'))}</button>
+      <button type="button" class="btn ghost" id="ageNo">${esc(t('age_no'))}</button>
     </div>`;
+  bindLangButtons();
   const panelTop = ui().querySelector('.panel').getBoundingClientRect().top - 10;
-  const ageText = (J && J.age_gate) || '';
+  const ageText = t('age_gate') || '';
   const lines = String(ageText).split('\n').map(t => t.trim()).filter(Boolean).map(t => ({ t }));
   const el = makeFigure('vesper-intrigued', lines, { cx: W / 2, feet: panelTop, cw: Math.min(W * .62, 250), top: sf.t + 64, maxW: W - 24, prefW: W * .88, minFs: 20, maxFs: 26 }, { seed: 18 });
   mountFigure(el, 'enter');
@@ -412,12 +479,13 @@ function perm() {
   setScene('her-clockroom');
   clearFigures();
   const W = innerWidth, H = innerHeight, sf = safe();
-  ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="بازگشت">${ICON.back}</button><span></span></div>
-    <div class="panel"><p>${esc(J.shake_permission[1])}</p>
-      <button class="btn" id="yes">${esc(J.shake_permission[2].replace(/[\[\]]/g, '').trim())}</button>
-      <button class="btn ghost" id="no">${esc(J.shake_permission[3].replace(/[\[\]]/g, '').trim())}</button></div>`;
+  ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="${esc(t('back'))}">${ICON.back}</button>${langButtonsHtml()}</div>
+    <div class="panel"><p>${esc(t('shake_permission')[1])}</p>
+      <button class="btn" id="yes">${esc(t('shake_permission')[2].replace(/[\[\]]/g, '').trim())}</button>
+      <button class="btn ghost" id="no">${esc(t('shake_permission')[3].replace(/[\[\]]/g, '').trim())}</button></div>`;
+  bindLangButtons();
   const panelTop = ui().querySelector('.panel').getBoundingClientRect().top - 10;
-  const el = makeFigure('serein-listening', [{ t: J.shake_permission[0] }], { cx: W / 2, feet: panelTop, cw: Math.min(W * .58, 240), top: sf.t + 64, maxW: W - 30, prefW: W * .78, minFs: 22, maxFs: 28 }, { seed: 5 });
+  const el = makeFigure('serein-listening', [{ t: t('shake_permission')[0] }], { cx: W / 2, feet: panelTop, cw: Math.min(W * .58, 240), top: sf.t + 64, maxW: W - 30, prefW: W * .78, minFs: 22, maxFs: 28 }, { seed: 5 });
   mountFigure(el, 'enter');
   $('#back').onclick = () => history.back();
   const deck = state.deck;
@@ -444,15 +512,16 @@ function playScreen() {
   if (!play || play.deck !== state.deck) play = loadP(state.deck);
   if (play.maxPos == null) play.maxPos = play.pos;
   if (!play.views) play.views = {};
-  ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="بازگشت">${ICON.back}</button>
-      <button class="ib" id="mark" aria-label="نشان کردن">${ICON.mark}</button></div>
-    <button type="button" class="pill" id="pill" aria-label="کارت‌های کشیده‌شده"></button>
+  ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="${esc(t('back'))}">${ICON.back}</button>
+      <button class="ib" id="mark" aria-label="${esc(t('bookmark'))}">${ICON.mark}</button></div>
+    <button type="button" class="pill" id="pill" aria-label="${esc(t('cards_drawn'))}"></button>
     <div class="bottom">
-      ${modeButtonsHtml()}
-      <button type="button" class="btn prev" id="prev">→ قبلی</button>
+      <div class="controls-row">${modeButtonsHtml()}${langButtonsHtml()}</div>
+      <button type="button" class="btn prev" id="prev">${esc(t('prev_button'))}</button>
       <div class="hint" id="hint"></div>
-      <button type="button" class="btn next" id="next">${esc(J.next_button)}</button>
+      <button type="button" class="btn next" id="next">${esc(t('next_button'))}</button>
     </div>`;
+  bindLangButtons();
   $('#back').onclick = () => go({ screen: 'home' });
   $('#next').onclick = () => { maybeReask(); goNext('tap'); };
   $('#prev').onclick = () => goPrev();
@@ -468,9 +537,9 @@ function playScreen() {
 function updateHint() {
   const h = $('#hint'); if (!h) return;
   const mode = currentMode();
-  if (mode === 'shake' && shake.status === 'on') h.innerHTML = `<small>${esc(J.shake_hint[1])}</small>`;
+  if (mode === 'shake' && shake.status === 'on') h.innerHTML = `<small>${esc(t('shake_hint')[1])}</small>`;
   else if (mode === 'shake' && (shake.status === 'needs' || shake.status === 'denied' || shake.status === 'declined'))
-    h.innerHTML = '<small>یه ضربه روی «تکون»، تا اجازه ثبت بشه</small>';
+    h.innerHTML = `<small>${esc(t('tap_for_perm'))}</small>`;
   else h.innerHTML = '';
 }
 function updateNav() {
@@ -484,7 +553,7 @@ function updateNav() {
 }
 function updateTop() {
   const n = play.order.length, p = $('#pill'); if (!p) return;
-  const label = play.pos >= n ? `${DECKS[play.deck]} · تموم شد` : `${DECKS[play.deck]}  —  ${fa(Math.max(1, play.pos + 1))} از ${fa(n)}`;
+  const label = play.pos >= n ? `${deckName(play.deck)} · ${t('done')}` : `${deckName(play.deck)}  —  ${num(Math.max(1, play.pos + 1))} ${t('of')} ${num(n)}`;
   p.innerHTML = `<span class="hist-ico">${ICON.list}</span>${label}`;
   const m = $('#mark'), id = play.order[play.pos];
   if (m) { m.classList.toggle('on', play.pos < n && store.get('fav', []).includes(id)); m.style.visibility = play.pos < n ? '' : 'hidden'; }
@@ -550,7 +619,7 @@ function cardPlace(sf) {
 }
 async function showCard(anim, dir = 1) {
   const panel = ui().querySelector('.panel'); if (panel) panel.remove();
-  const [id, text] = qById(play.deck, play.order[play.pos]);
+  const q = qById(play.deck, play.order[play.pos]); const id = q[0], text = qText(q);
   const sf = safe();
   const saved = play.views && play.views[play.pos];
   const pname = saved && saved.pose && D.poses[saved.pose] ? saved.pose : pickPose();
@@ -570,7 +639,7 @@ function showEnd(anim) {
   updateTop(); const sf = safe(), W = innerWidth;
   const old = ui().querySelector('.panel'); if (old) old.remove();
   const panel = document.createElement('div'); panel.className = 'panel';
-  panel.innerHTML = `<p>${esc(J.deck_end[1])}</p><button class="btn" id="again">از اول، با یه بُر تازه</button><button type="button" class="link" id="endReset">از اول</button><button class="btn ghost" id="other">یه لیوان چای و یه دسته‌ی دیگه</button>`;
+  panel.innerHTML = `<p>${esc(t('deck_end')[1])}</p><button class="btn" id="again">${esc(t('again_fresh'))}</button><button type="button" class="link" id="endReset">${esc(t('start_over'))}</button><button class="btn ghost" id="other">${esc(t('other_deck'))}</button>`;
   ui().appendChild(panel);
   const ask = () => askReset(play.deck);
   $('#again').onclick = ask;
@@ -578,7 +647,7 @@ function showEnd(anim) {
   $('#other').onclick = () => go({ screen: 'home' });
   setScene('her-busstop');
   const top = panel.getBoundingClientRect().top - 8;
-  return loadImgs('morrow-waiting').then(() => { const el = makeFigure('morrow-waiting', [{ t: J.deck_end[0] }], { cx: W / 2, feet: top, cw: Math.min(W * .58, 240), top: sf.t + 62, maxW: W - 30, prefW: W * .78, minFs: 22, maxFs: 28 }, { seed: 99 });
+  return loadImgs('morrow-waiting').then(() => { const el = makeFigure('morrow-waiting', [{ t: t('deck_end')[0] }], { cx: W / 2, feet: top, cw: Math.min(W * .58, 240), top: sf.t + 62, maxW: W - 30, prefW: W * .78, minFs: 22, maxFs: 28 }, { seed: 99 });
     mountFigure(el, anim ? 'enter' : null); });
 }
 function openHist() {
@@ -590,17 +659,17 @@ function openHist() {
   for (let i = 0; i <= last; i++) {
     const q = qById(play.deck, play.order[i]); if (!q) continue;
     const on = i === play.pos ? ' on' : '';
-    items.push(`<button type="button" class="fav${on}" data-i="${i}"><span class="n">${fa(i + 1)}</span>${esc(fa(q[1]))}</button>`);
+    items.push(`<button type="button" class="fav${on}" data-i="${i}"><span class="n">${num(i + 1)}</span>${esc(num(qText(q)))}</button>`);
   }
   box.innerHTML = `<div class="sheet">
     <div class="hist-head">
-      <p class="hist-title">کارت‌های کشیده‌شده</p>
+      <p class="hist-title">${esc(t('cards_drawn'))}</p>
       <div class="hist-actions">
-        <button type="button" class="btn reset" id="histReset">از اول</button>
-        <button type="button" class="hist-close" id="histClose">بستن</button>
+        <button type="button" class="btn reset" id="histReset">${esc(t('start_over'))}</button>
+        <button type="button" class="hist-close" id="histClose">${esc(t('close'))}</button>
       </div>
     </div>
-    <div class="hist-list">${items.join('') || '<p class="empty">هنوز کارتی نکشیدی.</p>'}</div>
+    <div class="hist-list">${items.join('') || `<p class="empty">${esc(t('none_drawn'))}</p>`}</div>
   </div>`;
   box.addEventListener('click', e => {
     if (e.target.closest('#histReset, #resetConfirm')) return;
@@ -618,9 +687,9 @@ function askReset(deck) {
   if (!d) return;
   closeResetConfirm();
   const box = document.createElement('div'); box.className = 'reset-ask'; box.id = 'resetConfirm';
-  box.innerHTML = `<p>همه‌ی کارت‌های این دسته دوباره بُر بخورن؟</p>
-    <button type="button" class="btn" id="resetYes">آره، از اول</button>
-    <button type="button" class="btn ghost" id="resetNo">نه</button>`;
+  box.innerHTML = `<p>${esc(t('reset_confirm'))}</p>
+    <button type="button" class="btn" id="resetYes">${esc(t('reset_yes'))}</button>
+    <button type="button" class="btn ghost" id="resetNo">${esc(t('reset_no'))}</button>`;
   box.addEventListener('click', e => { if (e.target === box) closeResetConfirm(); });
   document.body.appendChild(box);
   $('#resetYes').onclick = ev => { ev.stopPropagation(); resetDeck(d); };
@@ -645,7 +714,7 @@ function resetDeck(deck) {
 /* ---------------- zoomed question ---------------- */
 function openZoom(text) {
   closeZoom(); closeHist(); const z = document.createElement('div'); z.className = 'zoom'; z.id = 'zoom';
-  z.innerHTML = `<div class="sheet">${esc(fa(text))}</div>`; z.onclick = closeZoom; document.body.appendChild(z);
+  z.innerHTML = `<div class="sheet">${esc(num(text))}</div>`; z.onclick = closeZoom; document.body.appendChild(z);
 }
 function closeZoom() { const z = $('#zoom'); if (z) z.remove(); }
 
@@ -653,18 +722,19 @@ function closeZoom() { const z = $('#zoom'); if (z) z.remove(); }
 function favScreen() {
   clearFigures(); setScene('her-theater');
   const fv = store.get('fav', []); const all = [...D.decks.General, ...D.decks.Relation];
-  ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="بازگشت">${ICON.back}</button><span></span></div>
-    <div class="pill">نشان‌شده‌ها</div><div class="favs" id="favs"></div>`;
+  ui().innerHTML = `<div class="top"><button class="ib" id="back" aria-label="${esc(t('back'))}">${ICON.back}</button>${langButtonsHtml()}</div>
+    <div class="pill">${esc(t('bookmarks'))}</div><div class="favs" id="favs"></div>`;
+  bindLangButtons();
   const box = $('#favs');
   const items = fv.map(id => all.find(c => c[0] === id)).filter(Boolean);
-  box.innerHTML = items.length ? items.map(([id, t]) => `<div class="fav" data-id="${id}">${esc(fa(t))}<button aria-label="حذف">×</button></div>`).join('') : `<p class="empty">هنوز هیچی نشان نکردی.</p>`;
+  box.innerHTML = items.length ? items.map(c => `<div class="fav" data-id="${c[0]}">${esc(num(qText(c)))}<button aria-label="${esc(t('remove'))}">×</button></div>`).join('') : `<p class="empty">${esc(t('no_bookmarks'))}</p>`;
   box.querySelectorAll('.fav button').forEach(b => b.onclick = () => { store.set('fav', store.get('fav', []).filter(x => x !== b.parentNode.dataset.id)); favScreen(); });
   $('#back').onclick = () => go({ screen: 'home' });
 }
 
 /* ---------------- swipe + boot ---------------- */
 let swipe = null;
-function swipeIgnore(el) { return el && el.closest && el.closest('button, .mode, .panel, .zoom, .hist, .reset-ask, .ib, .btn, .pill, a, .bottom, .top, .deck-reset'); }
+function swipeIgnore(el) { return el && el.closest && el.closest('button, .mode, .lang, .panel, .zoom, .hist, .reset-ask, .ib, .btn, .pill, a, .bottom, .top, .deck-reset'); }
 addEventListener('touchstart', e => {
   if (e.touches.length !== 1 || state.screen !== 'play' || $('#zoom') || $('#hist')) { swipe = null; return; }
   if (swipeIgnore(e.target)) { swipe = null; return; }
@@ -685,8 +755,10 @@ addEventListener('touchend', e => {
 addEventListener('click', e => { if (Date.now() - swipeLock < 500) { e.preventDefault(); e.stopPropagation(); } }, true);
 
 document.addEventListener('keydown', e => { if (state.screen !== 'play') return;
-  if (e.key === ' ' || e.key === 'ArrowLeft' || e.key === 'Enter') goNext('tap');
-  if (e.key === 'ArrowRight' || e.key === 'Backspace') goPrev();
+  const nextKeys = lang === 'en' ? [' ', 'ArrowRight', 'Enter'] : [' ', 'ArrowLeft', 'Enter'];
+  const prevKeys = lang === 'en' ? ['ArrowLeft', 'Backspace'] : ['ArrowRight', 'Backspace'];
+  if (nextKeys.includes(e.key)) goNext('tap');
+  if (prevKeys.includes(e.key)) goPrev();
   if (e.key === 's') goNext('shake'); });
 function isScrollableTarget(el) {
   return el && el.closest && el.closest('.hist-list, .favs, .zoom .sheet');
@@ -712,11 +784,12 @@ addEventListener('resize', () => {
   }, 200);
 });
 lastLayout = { w: innerWidth, h: innerHeight };
-window.APP = { draw, go, goPrev, goNext, goTo, enterDeck, chooseDeck, setInputMode, currentMode, openHist, askReset, resetDeck, lockScroll, get state() { return state; }, get play() { return play; }, get version() { return window.SW_VERSION || ''; }, shake, tilt, D };
+window.APP = { draw, go, goPrev, goNext, goTo, enterDeck, chooseDeck, setInputMode, currentMode, openHist, askReset, resetDeck, lockScroll, setLang, get lang() { return lang; }, get state() { return state; }, get play() { return play; }, get version() { return window.SW_VERSION || ''; }, shake, tilt, D };
 initShake();
-const lj = $('#loadJoke'); lj.textContent = pick(J.loading);
+initLang();
+const lj = $('#loadJoke'); lj.textContent = pick(t('loading'));
 const t0 = Date.now();
-const pre = [document.fonts.load('20px Marhey', 'سلام'), document.fonts.load('15px Playpen', 'سلام'), loadImgs('morrow-proud-but-hiding-it'), loadImgs('vesper-plotting'),
+const pre = [document.fonts.load('20px Marhey', 'سلام'), document.fonts.load('15px Playpen', 'سلام'), document.fonts.load('20px Gaegu', 'Hello'), document.fonts.load('700 22px Gaegu', 'Hello'), loadImgs('morrow-proud-but-hiding-it'), loadImgs('vesper-plotting'),
   new Promise(r => { const i = new Image(); i.onload = i.onerror = r; i.src = 'img/scenes/her-museum.webp'; })];
 Promise.race([Promise.all(pre), new Promise(r => setTimeout(r, 6000))]).then(() => {
   setTimeout(() => { history.replaceState({ screen: 'home' }, ''); state = { screen: 'home' }; render(); $('#loading').classList.add('gone'); setTimeout(() => $('#loading').remove(), 600); },

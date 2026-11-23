@@ -1,3 +1,6 @@
 Marhey — Copyright 2022 The Marhey Project Authors (https://github.com/namelatype/Marhey)
 Playpen Sans Arabic — Copyright 2023 The Playpen Sans Project Authors (https://github.com/TypeTogether/Playpen-Sans)
 Both are licensed under the SIL Open Font License 1.1 (https://openfontlicense.org). Files here are subsetted, single-weight instances.
+
+Gaegu — Copyright 2018 The Gaegu Project Authors (https://github.com/JoungminLee/Gaegu), SIL OFL 1.1.
+Patrick Hand — Copyright 2010 Patrick Wagesreiter, SIL OFL 1.1.

@@ -1,5 +1,7 @@
 @font-face{font-family:Marhey;src:url(../fonts/Marhey.woff2) format('woff2');font-display:block}
 @font-face{font-family:Playpen;src:url(../fonts/PlaypenSansArabic.woff2) format('woff2');font-display:block}
+@font-face{font-family:Gaegu;src:url(../fonts/Gaegu-Regular.woff2) format('woff2');font-weight:400;font-display:block}
+@font-face{font-family:Gaegu;src:url(../fonts/Gaegu-Bold.woff2) format('woff2');font-weight:700;font-display:block}
 /* Marhey's calt ligatures swallow Persian ی in some words (نیست، بیشتری، نیاز…). Keep rlig so لا stays connected. */
 .fig .txt,.title,.loading p,.zoom .sheet,.fav,.hist .fav,.hist-title,.reset-ask p{font-feature-settings:"calt" 0}
 :root{--ink:#4a3a33;--ink2:#6a554a;--paper:#f3e3cc;--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px)}
@@ -184,3 +186,23 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
   .scene{transition:opacity .2s!important}
 }
 .still{position:absolute;inset:0}.still img{position:absolute;inset:0;width:100%;height:100%}
+
+/* English: hand-drawn Latin to match Marhey's rough sketchbook lettering */
+html[lang="en"] body,body.en{font-family:Gaegu,Georgia,sans-serif;font-weight:400}
+body.en .fig .txt,body.en .title,body.en .loading p,body.en .zoom .sheet,body.en .fav,body.en .hist .fav,body.en .hist-title,body.en .reset-ask p{
+  font-family:Gaegu,Georgia,sans-serif;font-weight:700;font-feature-settings:normal}
+body.en .fig .txt .small,body.en .hist .fav .n{font-family:Gaegu,Georgia,sans-serif;font-weight:400}
+body.en .title{font-weight:700}
+html[lang="en"] .top #back svg,body.en .top #back svg{transform:scaleX(-1)}
+.lang{display:inline-flex;align-items:center;justify-content:center;transform:rotate(.4deg)}
+.lang button{font-size:13px;padding:4px 10px 3px;white-space:nowrap;border-style:solid;border-color:transparent;border-width:6px 10px;
+  border-image:url(../img/signs/sign-2.webp) 160 170 fill / 6px 10px stretch;opacity:.5;color:#6a554a;transition:opacity .15s,transform .12s}
+.lang button.on{border-image-source:url(../img/signs/sign-1.webp);opacity:1;color:#4a3a33}
+.lang button:active{transform:scale(.94)}
+.titlebox .lang{margin-top:10px}
+.top .lang{flex:0 0 auto}
+.controls-row{grid-area:mode;display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;justify-self:center}
+.controls-row .mode{grid-area:auto;margin:0}
+.hist .fav .n{margin-inline-end:8px;margin-left:0}
+
+html[lang="en"] .loading p,html.en .loading p,html[lang="en"] .fig .txt,html[lang="en"] .title{font-family:Gaegu,Georgia,sans-serif;font-weight:700;font-feature-settings:normal}
